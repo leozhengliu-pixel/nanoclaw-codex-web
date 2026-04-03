@@ -208,7 +208,7 @@ async function runProviderRequest(request: RunnerTaskRequest, eventsFile: string
 }
 
 async function runCodex(request: RunnerTaskRequest, eventsFile: string): Promise<void> {
-  if (request.auth) {
+  if (request.provider === "openai" && request.auth) {
     await runProviderRequest(request, eventsFile);
     return;
   }
@@ -219,12 +219,12 @@ async function runCodex(request: RunnerTaskRequest, eventsFile: string): Promise
   const child = spawn(
     request.codexBinaryPath,
     [
+      "-a",
+      "never",
       "exec",
       "--skip-git-repo-check",
       "--sandbox",
       "workspace-write",
-      "-a",
-      "never",
       "-C",
       request.workingDirectory,
       "-o",
@@ -236,7 +236,7 @@ async function runCodex(request: RunnerTaskRequest, eventsFile: string): Promise
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
-        CODEX_HOME: process.env.CODEX_HOME ?? "/root/.codex",
+        CODEX_HOME: request.codexHomePath || process.env.CODEX_HOME || "/root/.codex",
         HOME: process.env.HOME ?? "/root"
       }
     }

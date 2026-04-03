@@ -9,6 +9,7 @@ export interface RunnerTaskRequest {
   globalMemoryFile: string;
   groupMemoryFile: string;
   sessionsPath: string;
+  codexHomePath: string;
   messages: RuntimeMessage[];
   provider: ProviderId;
   modelId: string;

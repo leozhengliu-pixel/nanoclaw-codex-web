@@ -22,6 +22,7 @@ export class CodexRuntime implements AgentRuntime {
     private readonly binaryPath: string,
     private readonly defaultTimeoutMs: number,
     private readonly authService: ProviderAuthService,
+    private readonly codexHomePath: string,
     private readonly runnerMode: AgentRunnerMode,
     private runner?: ContainerRunner
   ) {}
@@ -103,6 +104,7 @@ export class CodexRuntime implements AgentRuntime {
       globalMemoryFile: input.memoryFiles[0] ?? "",
       groupMemoryFile: input.memoryFiles[1] ?? "",
       sessionsPath: input.sessionsPath ?? "",
+      codexHomePath: this.codexHomePath,
       messages: input.messages,
       provider: model.provider,
       modelId: model.modelId,

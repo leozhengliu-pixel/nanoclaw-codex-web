@@ -60,15 +60,8 @@ export class ContainerRunner {
     });
 
     while (!done && childExitCode === null) {
-      const eventsContent = await fs.readFile(eventsFile, "utf8").catch(() => "");
-      if (eventsContent.length > lastOffset) {
-        const slice = eventsContent.slice(lastOffset);
-        lastOffset = eventsContent.length;
-        const lines = slice.split(/\r?\n/).filter(Boolean);
-        for (const line of lines) {
-          const envelope = JSON.parse(line) as RuntimeEventEnvelope;
-          yield envelope.event;
-        }
+      for await (const event of this.readPendingEvents(eventsFile, () => lastOffset, (value) => (lastOffset = value))) {
+        yield event;
       }
 
       const requestFiles = await fs.readdir(toolRequestsDir).catch(() => []);
@@ -94,7 +87,18 @@ export class ContainerRunner {
       }
     }
 
-    if (childExitCode !== null && !done) {
+    for await (const event of this.readPendingEvents(eventsFile, () => lastOffset, (value) => (lastOffset = value))) {
+      yield event;
+    }
+
+    done =
+      done ||
+      (await fs
+        .access(doneFile)
+        .then(() => true)
+        .catch(() => false));
+
+    if (childExitCode !== null && childExitCode !== 0 && !done) {
       const stderr = stderrChunks.join("").trim();
       yield {
         type: "error",
@@ -199,7 +203,8 @@ export class ContainerRunner {
       workingDirectory: "/workspace",
       globalMemoryFile: "/memory/global/CLAUDE.md",
       groupMemoryFile: "/memory/group/CLAUDE.md",
-      sessionsPath: "/sessions"
+      sessionsPath: "/sessions",
+      codexHomePath: "/root/.codex"
     };
   }
 
@@ -297,5 +302,24 @@ export class ContainerRunner {
 
   private async removeContainer(containerName: string): Promise<void> {
     await this.runEngineCommand(["rm", "-f", containerName]);
+  }
+
+  private async *readPendingEvents(
+    eventsFile: string,
+    getOffset: () => number,
+    setOffset: (value: number) => void
+  ): AsyncIterable<RuntimeEvent> {
+    const eventsContent = await fs.readFile(eventsFile, "utf8").catch(() => "");
+    if (eventsContent.length <= getOffset()) {
+      return;
+    }
+
+    const slice = eventsContent.slice(getOffset());
+    setOffset(eventsContent.length);
+    const lines = slice.split(/\r?\n/).filter(Boolean);
+    for (const line of lines) {
+      const envelope = JSON.parse(line) as RuntimeEventEnvelope;
+      yield envelope.event;
+    }
   }
 }

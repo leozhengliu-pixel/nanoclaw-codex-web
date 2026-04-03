@@ -14,8 +14,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:container": "NANOCLAW_RUN_CONTAINER_E2E=1 vitest run tests/container-engine.e2e.test.ts",
-    "build:image": "sh ./container/build.sh",
-    "start:host": "sh ./scripts/start-host.sh"
+    "build:image": "bash ./container/build.sh",
+    "start:host": "bash ./scripts/start-host.sh"
   },
   "engines": {
     "node": ">=20"

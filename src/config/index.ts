@@ -92,6 +92,7 @@ function parseContainerExecutor(value: string | undefined): ContainerExecutorMod
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): AppConfig {
+  const homeCodexPath = env.HOME ? path.resolve(env.HOME, ".codex") : path.resolve(cwd, "contexts", "codex-home");
   const dataRoot = path.resolve(cwd, env.NANOCLAW_DATA_ROOT ?? "data");
   const groupsRoot = path.resolve(cwd, env.NANOCLAW_GROUPS_ROOT ?? "groups");
   const sqlitePath = path.resolve(cwd, env.NANOCLAW_SQLITE_PATH ?? path.join("data", "db.sqlite"));
@@ -126,7 +127,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
     mountAllowlistPath:
       env.NANOCLAW_MOUNT_ALLOWLIST_PATH ??
       path.resolve(cwd, "config-examples", "mount-allowlist.json"),
-    codexHomePath: path.resolve(cwd, env.NANOCLAW_CODEX_HOME_PATH ?? path.join("contexts", "codex-home")),
+    codexHomePath: env.NANOCLAW_CODEX_HOME_PATH ? path.resolve(cwd, env.NANOCLAW_CODEX_HOME_PATH) : homeCodexPath,
     openaiApiBaseUrl: env.NANOCLAW_OPENAI_API_BASE_URL ?? "https://api.openai.com/v1",
     openaiCodexBaseUrl: env.NANOCLAW_OPENAI_CODEX_BASE_URL ?? "https://chatgpt.com/backend-api/codex",
     defaultTimezone: env.NANOCLAW_DEFAULT_TIMEZONE ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC",

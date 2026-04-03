@@ -132,6 +132,15 @@ async function readCodexHomeCredential(codexHomePath: string): Promise<ProviderO
   return credential;
 }
 
+function getCodexHomeCandidates(config: AppConfig): string[] {
+  const candidates = [config.codexHomePath];
+  if (process.env.HOME) {
+    candidates.push(path.join(process.env.HOME, ".codex"));
+  }
+
+  return [...new Set(candidates.map((candidate) => path.resolve(candidate)))];
+}
+
 export class ProviderAuthService {
   public constructor(
     private readonly storage: SqliteStorage,
@@ -151,7 +160,14 @@ export class ProviderAuthService {
   }
 
   public async importFromCodexHome(): Promise<void> {
-    const imported = await readCodexHomeCredential(this.config.codexHomePath).catch(() => null);
+    let imported: ProviderOAuthCredential | null = null;
+    for (const candidate of getCodexHomeCandidates(this.config)) {
+      imported = await readCodexHomeCredential(candidate).catch(() => null);
+      if (imported) {
+        break;
+      }
+    }
+
     if (!imported) {
       return;
     }

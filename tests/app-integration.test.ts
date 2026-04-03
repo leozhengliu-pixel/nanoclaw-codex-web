@@ -3,12 +3,16 @@ import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { LocalDevChannel } from "../src/channels/local-dev-channel.js";
 import { MainLocalChannel } from "../src/channels/main-local-channel.js";
+import { MockRuntime } from "../src/runtime/mock/mock-runtime.js";
 import { createTempDir, createTestConfig } from "./test-utils.js";
 
-async function waitForSentMessage(channel: LocalDevChannel): Promise<Array<{ externalId: string; text: string }>> {
+async function waitForSentMessage(
+  channel: LocalDevChannel,
+  expectedText: string
+): Promise<Array<{ externalId: string; text: string }>> {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const sent = channel.getSentMessages();
-    if (sent.length > 0) {
+    if (sent.some((entry) => entry.text.includes(expectedText))) {
       return sent;
     }
 
@@ -24,7 +28,8 @@ describe("app integration", () => {
     const app = await createApp(
       createTestConfig(root, {
         agentRunnerMode: "mock"
-      })
+      }),
+      new MockRuntime({ messagePrefix: "mock-container" })
     );
 
     try {
@@ -32,7 +37,7 @@ describe("app integration", () => {
       expect(channel).toBeInstanceOf(LocalDevChannel);
       await (channel as LocalDevChannel).emitInbound("local-dev:default", "@Andy hello");
 
-      const sent = await waitForSentMessage(channel as LocalDevChannel);
+      const sent = await waitForSentMessage(channel as LocalDevChannel, "mock-container:hello");
       expect(sent.at(-1)?.text).toContain("mock-container:hello");
       expect(app.storage.listTasks().length).toBe(1);
     } finally {

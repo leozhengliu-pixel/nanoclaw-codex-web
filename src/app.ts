@@ -68,7 +68,8 @@ export async function createApp(config = loadConfig(), runtime?: AgentRuntime): 
 
   // Force allowlist load on startup so config errors fail fast.
   mountSecurity.validateMounts([]);
-  const resolvedRuntime = runtime ?? new CodexRuntime(config.codexBinaryPath, config.runtimeTimeoutMs, providerAuth, config.agentRunnerMode);
+  const resolvedRuntime =
+    runtime ?? new CodexRuntime(config.codexBinaryPath, config.runtimeTimeoutMs, providerAuth, config.codexHomePath, config.agentRunnerMode);
 
   const host = new HostService(resolvedRuntime, storage, groupManager, queue, config.runtimeTimeoutMs);
   const scheduler = new TaskScheduler(storage, host, config.schedulerPollIntervalMs);
