@@ -22,7 +22,6 @@ export class CodexRuntime implements AgentRuntime {
     private readonly binaryPath: string,
     private readonly defaultTimeoutMs: number,
     private readonly authService: ProviderAuthService,
-    private readonly codexHomePath: string,
     private readonly runnerMode: AgentRunnerMode,
     private runner?: ContainerRunner
   ) {}
@@ -32,7 +31,7 @@ export class CodexRuntime implements AgentRuntime {
   }
 
   public async createSession(input: RuntimeSessionInput): Promise<RuntimeSession> {
-    const sessionId = randomUUID();
+    const sessionId = input.sessionHint?.id ?? randomUUID();
     const model = input.model ?? input.group?.runtimeConfig ?? getDefaultModelRef();
     const isMockMode = this.runnerMode === "mock";
     if (isMockMode) {
@@ -104,7 +103,6 @@ export class CodexRuntime implements AgentRuntime {
       globalMemoryFile: input.memoryFiles[0] ?? "",
       groupMemoryFile: input.memoryFiles[1] ?? "",
       sessionsPath: input.sessionsPath ?? "",
-      codexHomePath: this.codexHomePath,
       messages: input.messages,
       provider: model.provider,
       modelId: model.modelId,

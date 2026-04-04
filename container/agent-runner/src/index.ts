@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import type { Readable } from "node:stream";
 
 import type { RunnerTaskRequest, RuntimeEventEnvelope, ToolRequestEnvelope, ToolResponseEnvelope } from "../../../src/ipc/protocol.js";
 import type { ProviderCredential } from "../../../src/types/runtime.js";
@@ -9,6 +10,78 @@ import type { ProviderCredential } from "../../../src/types/runtime.js";
 function getArg(flag: string): string | undefined {
   const index = process.argv.indexOf(flag);
   return index === -1 ? undefined : process.argv[index + 1];
+}
+
+async function waitForChildClose(child: ReturnType<typeof spawn>): Promise<number | null> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return child.exitCode;
+  }
+
+  return await new Promise<number | null>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", resolve);
+  });
+}
+
+function waitForReadableToFinish(stream: Readable | null | undefined): Promise<void> {
+  if (!stream) {
+    return Promise.resolve();
+  }
+
+  const typed = stream as Readable & { readableEnded?: boolean; closed?: boolean; destroyed?: boolean };
+  if (typed.readableEnded || typed.closed || typed.destroyed) {
+    return Promise.resolve();
+  }
+
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve();
+    };
+
+    stream.once("end", finish);
+    stream.once("close", finish);
+    stream.once("error", finish);
+  });
+}
+
+function isJsonObjectLine(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed.startsWith("{") && trimmed.endsWith("}");
+}
+
+function parseCodexEventLine(line: string): Record<string, unknown> | null {
+  if (!isJsonObjectLine(line)) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(line) as Record<string, unknown>;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function collectAgentMessage(payload: Record<string, unknown>): string | null {
+  if (payload.type !== "item.completed") {
+    return null;
+  }
+
+  const item = payload.item;
+  if (!item || typeof item !== "object") {
+    return null;
+  }
+
+  const typedItem = item as { type?: unknown; text?: unknown };
+  if (typedItem.type !== "agent_message" || typeof typedItem.text !== "string") {
+    return null;
+  }
+
+  return typedItem.text.trim() || null;
 }
 
 async function appendEvent(eventsFile: string, taskId: string, event: RuntimeEventEnvelope["event"]): Promise<void> {
@@ -207,6 +280,44 @@ async function runProviderRequest(request: RunnerTaskRequest, eventsFile: string
   });
 }
 
+async function createIsolatedCodexHome(
+  request: RunnerTaskRequest,
+  eventsFile: string
+): Promise<{ codexHomePath: string; cleanup: () => Promise<void> }> {
+  const codexHomePath = path.join(path.dirname(eventsFile), "codex-home");
+  await fs.mkdir(codexHomePath, { recursive: true });
+
+  if (!request.auth || request.auth.type !== "oauth") {
+    throw new Error("Missing OAuth credential for openai-codex");
+  }
+
+  await fs.writeFile(
+    path.join(codexHomePath, "auth.json"),
+    JSON.stringify(
+      {
+        auth_mode: "chatgpt",
+        OPENAI_API_KEY: null,
+        tokens: {
+          id_token: request.auth.idToken ?? request.auth.accessToken,
+          access_token: request.auth.accessToken,
+          refresh_token: request.auth.refreshToken,
+          ...(request.auth.accountId ? { account_id: request.auth.accountId } : {})
+        },
+        last_refresh: new Date().toISOString()
+      },
+      null,
+      2
+    )
+  );
+
+  return {
+    codexHomePath,
+    cleanup: async () => {
+      await fs.rm(codexHomePath, { recursive: true, force: true });
+    }
+  };
+}
+
 async function runCodex(request: RunnerTaskRequest, eventsFile: string): Promise<void> {
   if (request.provider === "openai" && request.auth) {
     await runProviderRequest(request, eventsFile);
@@ -216,82 +327,175 @@ async function runCodex(request: RunnerTaskRequest, eventsFile: string): Promise
   const outputPath = path.join(path.dirname(eventsFile), "codex-last-message.txt");
   const sessionStatePath = path.join(request.sessionsPath, `${request.sessionId}.json`);
   const prompt = request.messages.map((message) => `${message.role.toUpperCase()}: ${message.content}`).join("\n");
-  const child = spawn(
-    request.codexBinaryPath,
-    [
-      "-a",
-      "never",
-      "exec",
-      "--skip-git-repo-check",
-      "--sandbox",
-      "workspace-write",
-      "-C",
-      request.workingDirectory,
-      "-o",
-      outputPath,
-      prompt
-    ],
-    {
-      cwd: request.workingDirectory,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        CODEX_HOME: request.codexHomePath || process.env.CODEX_HOME || "/root/.codex",
-        HOME: process.env.HOME ?? "/root"
+  const isolatedHome = await createIsolatedCodexHome(request, eventsFile);
+  try {
+    const child = spawn(
+      request.codexBinaryPath,
+      [
+        "exec",
+        "--json",
+        "--color",
+        "never",
+        "--skip-git-repo-check",
+        "--sandbox",
+        "workspace-write",
+        "--model",
+        request.modelId,
+        "-C",
+        request.workingDirectory,
+        "-o",
+        outputPath,
+        prompt
+      ],
+      {
+        cwd: request.workingDirectory,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          CODEX_HOME: isolatedHome.codexHomePath,
+          HOME: isolatedHome.codexHomePath
+        }
+      }
+    );
+
+    await appendEvent(eventsFile, request.taskId, { type: "status", value: "codex-started" });
+    const stderrChunks: string[] = [];
+    const stdoutChunks: string[] = [];
+    const agentMessages: string[] = [];
+    let stdoutBuffer = "";
+    let externalSessionId: string | undefined;
+    let tokenUsage:
+      | {
+          inputTokens?: number;
+          outputTokens?: number;
+          totalTokens?: number;
+        }
+      | undefined;
+    let timedOut = false;
+    const stdoutEnded = waitForReadableToFinish(child.stdout);
+    const stderrEnded = waitForReadableToFinish(child.stderr);
+    child.stderr.on("data", (chunk) => stderrChunks.push(chunk.toString()));
+    child.stdout.on("data", (chunk) => {
+      const text = chunk.toString();
+      stdoutChunks.push(text);
+      stdoutBuffer += text;
+      const lines = stdoutBuffer.split(/\r?\n/);
+      stdoutBuffer = lines.pop() ?? "";
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) {
+          continue;
+        }
+        const parsed = parseCodexEventLine(line);
+        if (!parsed) {
+          continue;
+        }
+
+        if (parsed.type === "thread.started" && typeof parsed.thread_id === "string") {
+          externalSessionId = parsed.thread_id;
+        }
+
+        const message = collectAgentMessage(parsed);
+        if (message) {
+          agentMessages.push(message);
+        }
+
+        if (parsed.type === "turn.completed") {
+          const usage = parsed.usage;
+          if (usage && typeof usage === "object") {
+            const typedUsage = usage as Record<string, unknown>;
+            tokenUsage = {
+              inputTokens:
+                typeof typedUsage.input_tokens === "number" ? typedUsage.input_tokens : undefined,
+              outputTokens:
+                typeof typedUsage.output_tokens === "number" ? typedUsage.output_tokens : undefined,
+              totalTokens:
+                typeof typedUsage.total_tokens === "number" ? typedUsage.total_tokens : undefined
+            };
+          }
+        }
+      }
+    });
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+    }, request.runtimeTimeoutMs);
+
+    const exitCode = await waitForChildClose(child);
+    clearTimeout(timeout);
+    await Promise.all([stdoutEnded, stderrEnded]);
+
+    const trailingLine = stdoutBuffer.trim();
+    if (trailingLine) {
+      const parsed = parseCodexEventLine(trailingLine);
+      if (parsed) {
+        if (parsed.type === "thread.started" && typeof parsed.thread_id === "string") {
+          externalSessionId = parsed.thread_id;
+        }
+        const message = collectAgentMessage(parsed);
+        if (message) {
+          agentMessages.push(message);
+        }
+        if (parsed.type === "turn.completed") {
+          const usage = parsed.usage;
+          if (usage && typeof usage === "object") {
+            const typedUsage = usage as Record<string, unknown>;
+            tokenUsage = {
+              inputTokens:
+                typeof typedUsage.input_tokens === "number" ? typedUsage.input_tokens : undefined,
+              outputTokens:
+                typeof typedUsage.output_tokens === "number" ? typedUsage.output_tokens : undefined,
+              totalTokens:
+                typeof typedUsage.total_tokens === "number" ? typedUsage.total_tokens : undefined
+            };
+          }
+        }
       }
     }
-  );
 
-  await appendEvent(eventsFile, request.taskId, { type: "status", value: "codex-started" });
-  const stderrChunks: string[] = [];
-  let timedOut = false;
-  child.stderr.on("data", (chunk) => stderrChunks.push(chunk.toString()));
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    child.kill("SIGTERM");
-  }, request.runtimeTimeoutMs);
+    await fs.mkdir(request.sessionsPath, { recursive: true });
+    await fs.writeFile(
+      sessionStatePath,
+      JSON.stringify(
+        {
+          sessionId: request.sessionId,
+          taskId: request.taskId,
+          externalSessionId,
+          exitCode,
+          updatedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )
+    );
 
-  const exitCode = await new Promise<number | null>((resolve, reject) => {
-    child.on("error", reject);
-    child.on("close", resolve);
-  });
-  clearTimeout(timeout);
-
-  await fs.mkdir(request.sessionsPath, { recursive: true });
-  await fs.writeFile(
-    sessionStatePath,
-    JSON.stringify(
-      {
-        sessionId: request.sessionId,
-        taskId: request.taskId,
-        exitCode,
-        updatedAt: new Date().toISOString()
-      },
-      null,
-      2
-    )
-  );
-
-  const output = await fs.readFile(outputPath, "utf8").catch(() => "");
-  if (output.trim()) {
-    await appendEvent(eventsFile, request.taskId, { type: "message", text: output.trim() });
-  }
-
-  if (timedOut) {
-    await appendEvent(eventsFile, request.taskId, { type: "error", error: "codex execution timed out" });
-  } else if (exitCode !== 0 && stderrChunks.length > 0) {
-    await appendEvent(eventsFile, request.taskId, { type: "error", error: stderrChunks.join("").trim() });
-  }
-
-  await appendEvent(eventsFile, request.taskId, {
-    type: "done",
-    usage: {
-      provider: request.provider,
-      modelId: request.modelId,
-      exitCode,
-      finishReason: exitCode === 0 ? "completed" : "failed"
+    const fallbackOutput = await fs.readFile(outputPath, "utf8").catch(() => "");
+    const output = (agentMessages.join("\n").trim() || fallbackOutput.trim());
+    if (output) {
+      await appendEvent(eventsFile, request.taskId, { type: "message", text: output });
     }
-  });
+
+    if (timedOut) {
+      await appendEvent(eventsFile, request.taskId, { type: "error", error: "codex execution timed out" });
+    } else if (exitCode !== 0 && stderrChunks.length > 0) {
+      await appendEvent(eventsFile, request.taskId, { type: "error", error: stderrChunks.join("").trim() });
+    } else if (exitCode !== 0 && stdoutChunks.length > 0) {
+      await appendEvent(eventsFile, request.taskId, { type: "error", error: stdoutChunks.join("").trim() });
+    }
+
+    await appendEvent(eventsFile, request.taskId, {
+      type: "done",
+      usage: {
+        provider: request.provider,
+        modelId: request.modelId,
+        exitCode,
+        finishReason: exitCode === 0 ? "completed" : "failed",
+        tokenUsage
+      }
+    });
+  } finally {
+    await isolatedHome.cleanup();
+  }
 }
 
 async function main(): Promise<void> {
@@ -315,4 +519,9 @@ async function main(): Promise<void> {
   await fs.writeFile(doneFile, JSON.stringify({ ok: true }, null, 2));
 }
 
-void main();
+try {
+  await main();
+} catch (error) {
+  console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+  process.exitCode = 1;
+}

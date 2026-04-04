@@ -1,11 +1,41 @@
-import type { ControlPlane } from "../host/control-plane.js";
-import type { RemoteControlService } from "../remote-control/remote-control.js";
+import type { RemoteControlRecorder } from "../control-events.js";
 import type { ToolRequestEnvelope, ToolResponseEnvelope } from "../ipc/protocol.js";
+
+export interface ToolHandlerControlPlane {
+  scheduleJob(input: {
+    groupId: string;
+    prompt: string;
+    scheduleType: "once" | "interval" | "cron";
+    scheduleValue: string;
+    timezone?: string;
+  }): unknown;
+  scheduleTask(input: {
+    groupId: string;
+    prompt: string;
+    intervalMs?: number;
+    runAt?: string;
+  }): unknown;
+  listTasks(groupId?: string): unknown;
+  getTask(taskId: string): unknown;
+  pauseTask(taskId: string): void;
+  resumeTask(taskId: string): void;
+  cancelTask(taskId: string): void;
+  sendMessage(groupId: string, text: string): Promise<void>;
+  registerGroup(input: {
+    channel: string;
+    externalId: string;
+    folder: string;
+  }): unknown;
+  listGroups(): unknown;
+  updateGroupMounts(groupId: string, containerConfig: {
+    additionalMounts: Array<unknown>;
+  }): void;
+}
 
 export class RunnerToolHandler {
   public constructor(
-    private readonly controlPlane: ControlPlane,
-    private readonly remoteControl: RemoteControlService
+    private readonly controlPlane: ToolHandlerControlPlane,
+    private readonly remoteControl: RemoteControlRecorder
   ) {}
 
   public async handleToolRequest(request: ToolRequestEnvelope): Promise<ToolResponseEnvelope> {

@@ -1,4 +1,4 @@
-import type { InboundMessage } from "../types/host.js";
+import type { NewMessage } from "../types.js";
 import { registerChannel, type Channel, type ChannelOpts } from "./registry.js";
 
 export class LocalDevChannel implements Channel {
@@ -24,18 +24,27 @@ export class LocalDevChannel implements Channel {
     return externalId.startsWith("local-dev");
   }
 
+  public ownsJid(jid: string): boolean {
+    return this.ownsExternalId(jid);
+  }
+
   public async sendMessage(externalId: string, text: string): Promise<void> {
     this.sentMessages.push({ externalId, text });
   }
 
   public async emitInbound(externalId: string, text: string, senderId = "local-user"): Promise<void> {
-    const message: InboundMessage = {
-      channel: this.name,
-      externalId,
-      text,
-      senderId
+    const createdAt = new Date().toISOString();
+    this.opts.onChatMetadata(externalId, createdAt, externalId, this.name, externalId !== "local-dev:default");
+
+    const message: NewMessage = {
+      id: `${this.name}:${Date.now()}:${Math.random().toString(16).slice(2)}`,
+      chat_jid: externalId,
+      sender: senderId,
+      sender_name: senderId,
+      content: text,
+      timestamp: createdAt
     };
-    await this.opts.onMessage(message);
+    await this.opts.onMessage(externalId, message);
   }
 
   public getSentMessages(): Array<{ externalId: string; text: string }> {

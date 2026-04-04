@@ -6,9 +6,37 @@ export interface ChannelAddress {
 }
 
 export interface InboundMessage extends ChannelAddress {
+  id?: string;
   text: string;
   senderId?: string;
   senderName?: string;
+  createdAt?: string;
+}
+
+export interface ChatMetadata extends ChannelAddress {
+  name?: string;
+  isGroup: boolean;
+  lastMessageAt: string;
+}
+
+export interface StoredInboundMessage extends InboundMessage {
+  id: string;
+  groupId: string;
+  createdAt: string;
+  processedAt?: string;
+}
+
+export interface GroupExecutionState {
+  groupId: string;
+  activeSessionId?: string;
+  activeRuntimeName?: string;
+  lastTaskId?: string;
+  lastInboundAt?: string;
+  lastProcessedAt?: string;
+  idleSince?: string;
+  status: "idle" | "running";
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface AdditionalMount {

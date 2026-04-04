@@ -1,21 +1,21 @@
 #!/usr/bin/env sh
 set -eu
 
-output_file=""
 prompt=""
+output_file=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    exec|--skip-git-repo-check|--sandbox|-a)
+    exec|--skip-git-repo-check|--json)
       shift
-      if [ "${1:-}" = "workspace-write" ] || [ "${1:-}" = "never" ]; then
-        shift
-      fi
+      ;;
+    --sandbox|--color|--model|-a)
+      shift 2
       ;;
     -C)
       shift 2
       ;;
-    -o)
+    -o|--output-last-message)
       output_file="$2"
       shift 2
       ;;
@@ -29,3 +29,8 @@ done
 if [ -n "$output_file" ]; then
   printf 'fake-codex:%s\n' "$prompt" > "$output_file"
 fi
+
+printf '{"type":"thread.started","thread_id":"fake-thread"}\n'
+printf '{"type":"turn.started"}\n'
+printf '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"fake-codex:%s"}}\n' "$prompt"
+printf '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}\n'

@@ -26,7 +26,12 @@ export class MockRuntime implements AgentRuntime {
   }
 
   public async createSession(input: RuntimeSessionInput): Promise<RuntimeSession> {
-    void input;
+    if (input.sessionHint?.id) {
+      return {
+        id: input.sessionHint.id
+      };
+    }
+
     return {
       id: randomUUID()
     };
