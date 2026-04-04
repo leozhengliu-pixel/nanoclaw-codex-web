@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 
 import type { AppConfig } from "../config/index.js";
+import { ensureContainerRuntimeRunning, hostGatewayArgs } from "../container-runtime.js";
 import type { ToolResponseEnvelope, RunnerTaskRequest, ToolRequestEnvelope, RuntimeEventEnvelope } from "../ipc/protocol.js";
 import type { RuntimeEvent } from "../types/runtime.js";
 
@@ -203,12 +204,12 @@ export class ContainerRunner {
       workingDirectory: "/workspace",
       globalMemoryFile: "/memory/global/CLAUDE.md",
       groupMemoryFile: "/memory/group/CLAUDE.md",
-      sessionsPath: "/sessions",
-      codexHomePath: "/root/.codex"
+      sessionsPath: "/sessions"
     };
   }
 
   private async startContainer(containerName: string, request: RunnerTaskRequest, runDir: string): Promise<void> {
+    ensureContainerRuntimeRunning();
     const mountArgs = await this.buildMountArgs(request, runDir);
     const args = [
       "run",
@@ -219,10 +220,6 @@ export class ContainerRunner {
       "--workdir",
       "/workspace",
       "-e",
-      `CODEX_HOME=/root/.codex`,
-      "-e",
-      `HOME=/root`,
-      "-e",
       `NANOCLAW_AGENT_RUNNER_MODE=${request.mode}`,
       "-e",
       `NANOCLAW_CONTAINER_SKILLS_PATH=/opt/nanoclaw/skills`,
@@ -230,6 +227,7 @@ export class ContainerRunner {
       `NANOCLAW_OPENAI_API_BASE_URL=${this.config.openaiApiBaseUrl}`,
       "-e",
       `NANOCLAW_OPENAI_CODEX_BASE_URL=${this.config.openaiCodexBaseUrl}`,
+      ...hostGatewayArgs(),
       ...mountArgs,
       this.config.containerImage,
       "sleep",
@@ -247,14 +245,6 @@ export class ContainerRunner {
       ...this.toMountArgs(request.globalMemoryFile, "/memory/global/CLAUDE.md", false),
       ...this.toMountArgs(request.groupMemoryFile, "/memory/group/CLAUDE.md", false)
     ];
-
-    const codexHomeExists = await fs
-      .access(this.config.codexHomePath)
-      .then(() => true)
-      .catch(() => false);
-    if (codexHomeExists) {
-      args.push(...this.toMountArgs(this.config.codexHomePath, "/root/.codex", false));
-    }
 
     const containerSkillsExist = await fs
       .access(this.config.containerSkillsPath)

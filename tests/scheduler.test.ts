@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createApp } from "../src/app.js";
+import { createOrchestrator } from "../src/orchestrator.js";
 import { RunnerToolHandler } from "../src/runner/tool-handler.js";
 import { MockRuntime } from "../src/runtime/mock/mock-runtime.js";
 import { runSetupStep } from "../setup/index.js";
@@ -9,12 +9,14 @@ import { createTempDir, createTestConfig } from "./test-utils.js";
 describe("scheduler and tool bridge", () => {
   it("executes once jobs through the same host path", async () => {
     const root = await createTempDir("nanoclaw-v2-scheduler-");
-    const app = await createApp(
+    const orchestrator = await createOrchestrator(
       createTestConfig(root),
       new MockRuntime({ messagePrefix: "scheduler" })
     );
+    const app = orchestrator.app;
 
     try {
+      orchestrator.start();
       const group = app.storage.getRegisteredGroupByAddress("local-dev", "local-dev:default");
       const job = app.scheduler.createOnce(group!.id, "scheduled hello", new Date(Date.now() - 1));
       await app.scheduler.tick(new Date());
@@ -23,18 +25,20 @@ describe("scheduler and tool bridge", () => {
       expect(stored?.active).toBe(false);
       expect(app.storage.listTasks(group!.id).length).toBe(1);
     } finally {
-      await app.stop();
+      await orchestrator.stop();
     }
   });
 
   it("runner tool handler can list tasks through the control plane", async () => {
     const root = await createTempDir("nanoclaw-v2-tools-");
-    const app = await createApp(
+    const orchestrator = await createOrchestrator(
       createTestConfig(root),
       new MockRuntime({ messagePrefix: "tool" })
     );
+    const app = orchestrator.app;
 
     try {
+      orchestrator.start();
       const group = app.storage.getRegisteredGroupByAddress("local-dev", "local-dev:default");
       await app.host.enqueueScheduledPrompt(group!.id, "hello tools");
 
@@ -52,18 +56,20 @@ describe("scheduler and tool bridge", () => {
       expect(Array.isArray(response.result)).toBe(true);
       expect((response.result as unknown[]).length).toBeGreaterThan(0);
     } finally {
-      await app.stop();
+      await orchestrator.stop();
     }
   });
 
   it("computes the next cron run after execution", async () => {
     const root = await createTempDir("nanoclaw-v2-cron-");
-    const app = await createApp(
+    const orchestrator = await createOrchestrator(
       createTestConfig(root, { defaultTimezone: "UTC" }),
       new MockRuntime({ messagePrefix: "cron" })
     );
+    const app = orchestrator.app;
 
     try {
+      orchestrator.start();
       const group = app.storage.getRegisteredGroupByAddress("local-dev", "local-dev:default");
       const job = app.scheduler.createCron(group!.id, "cron hello", "* * * * *", "UTC");
       await app.scheduler.tick(new Date(job.nextRunAt));
@@ -74,7 +80,7 @@ describe("scheduler and tool bridge", () => {
       expect(stored?.cronExpression).toBe("* * * * *");
       expect(stored?.nextRunAt).not.toBe(job.nextRunAt);
     } finally {
-      await app.stop();
+      await orchestrator.stop();
     }
   });
 

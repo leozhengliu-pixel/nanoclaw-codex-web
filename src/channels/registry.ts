@@ -1,18 +1,10 @@
-import type { InboundMessage } from "../types/host.js";
-
-export interface Channel {
-  readonly name: string;
-  connect(): Promise<void>;
-  disconnect(): Promise<void>;
-  isConnected(): boolean;
-  ownsExternalId(externalId: string): boolean;
-  sendMessage(externalId: string, text: string): Promise<void>;
-  setTyping?(externalId: string, isTyping: boolean): Promise<void>;
-  syncGroups?(force: boolean): Promise<void>;
-}
+import type { Channel, OnChatMetadata, OnInboundMessage, RegisteredGroup } from "../types.js";
+export type { Channel } from "../types.js";
 
 export interface ChannelOpts {
-  onMessage: (message: InboundMessage) => Promise<void>;
+  onMessage: OnInboundMessage;
+  onChatMetadata: OnChatMetadata;
+  registeredGroups: () => Record<string, RegisteredGroup>;
 }
 
 export type ChannelFactory = (opts: ChannelOpts) => Channel | null;

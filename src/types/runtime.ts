@@ -4,6 +4,8 @@ export type RuntimeMessageRole = "system" | "user" | "assistant";
 export type RuntimeExecutionMode = "host" | "container";
 export type ProviderId = "openai" | "openai-codex";
 export type ProviderAuthMode = "api-key" | "oauth";
+export type ProviderAuthSource = "project-store";
+export type ProviderLoginMethod = "oauth" | "device";
 
 export interface ModelRef {
   provider: ProviderId;
@@ -16,8 +18,11 @@ export interface ProviderOAuthCredential {
   accessToken: string;
   refreshToken: string;
   expiresAt: number;
+  idToken?: string;
   accountId?: string;
   email?: string;
+  method?: ProviderLoginMethod;
+  source?: ProviderAuthSource;
 }
 
 export interface ProviderApiKeyCredential {

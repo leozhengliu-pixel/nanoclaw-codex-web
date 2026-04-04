@@ -1,7 +1,5 @@
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
-import path from "node:path";
-
 import { loadConfig, type AppConfig } from "../src/config/index.js";
 import { ensureDefaultGroupAssets } from "../src/groups/default-groups.js";
 
@@ -61,7 +59,6 @@ function runGroups(config: AppConfig): Record<string, unknown> {
 function runStatus(config: AppConfig): Record<string, unknown> {
   const environment = runEnvironment(config);
   const groups = runGroups(config);
-  const codexAuthPath = path.join(config.codexHomePath, "auth.json");
   return {
     step: "status",
     ok: Boolean(environment.ok) && Boolean(groups.ok),
@@ -70,8 +67,7 @@ function runStatus(config: AppConfig): Record<string, unknown> {
     containerSkillsPath: config.containerSkillsPath,
     containerSkillsPresent: exists(config.containerSkillsPath),
     sqliteDirectoryPresent: exists(config.dataRoot),
-    codexHomePath: config.codexHomePath,
-    codexAuthPresent: exists(codexAuthPath)
+    messageStorePath: `${config.dataRoot}/messages.db`
   };
 }
 

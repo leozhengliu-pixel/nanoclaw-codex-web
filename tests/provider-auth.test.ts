@@ -1,40 +1,47 @@
-import fs from "node:fs/promises";
-import path from "node:path";
-
 import { describe, expect, it } from "vitest";
 
 import { ProviderAuthService } from "../src/auth/provider-auth-service.js";
-import { SqliteStorage } from "../src/storage/sqlite-storage.js";
 import { createTempDir, createTestConfig } from "./test-utils.js";
 
 describe("provider auth service", () => {
-  it("imports fresher codex oauth credentials from CODEX_HOME", async () => {
+  it("stores project oauth credentials with method metadata", async () => {
     const root = await createTempDir("nanoclaw-auth-");
     const config = createTestConfig(root);
-    const storage = new SqliteStorage(config.sqlitePath);
+    const store = new Map<string, Record<string, unknown>>();
+    const storage = {
+      getProviderAuth(providerId: "openai" | "openai-codex") {
+        return store.get(providerId) ?? null;
+      },
+      upsertProviderAuth(providerId: "openai" | "openai-codex", credential: Record<string, unknown>) {
+        store.set(providerId, credential);
+      },
+      clearProviderAuth(providerId: "openai" | "openai-codex") {
+        store.delete(providerId);
+      },
+      listProviderAuth() {
+        return [...store.entries()].map(([providerId, credential]) => ({ providerId, credential }));
+      }
+    };
     const service = new ProviderAuthService(storage, config);
 
-    try {
-      await fs.mkdir(config.codexHomePath, { recursive: true });
-      const accessPayload = Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 }), "utf8").toString(
-        "base64url"
-      );
-      const token = `header.${accessPayload}.sig`;
-      await fs.writeFile(
-        path.join(config.codexHomePath, "auth.json"),
-        JSON.stringify({
-          access_token: token,
-          refresh_token: "refresh-token"
-        })
-      );
+    service.setOAuthCredential({
+      provider: "openai-codex",
+      accessToken: "header.payload.sig",
+      refreshToken: "refresh-token",
+      expiresAt: Date.now() + 60_000,
+      accountId: "acct_123",
+      email: "user@example.com",
+      method: "device"
+    });
 
-      await service.importFromCodexHome();
+    const credential = service.get("openai-codex");
+    expect(credential?.type).toBe("oauth");
+    expect(credential && credential.type === "oauth" ? credential.method : "").toBe("device");
+    expect(credential && credential.type === "oauth" ? credential.source : "").toBe("project-store");
 
-      const credential = service.get("openai-codex");
-      expect(credential?.type).toBe("oauth");
-      expect(credential && credential.type === "oauth" ? credential.refreshToken : "").toBe("refresh-token");
-    } finally {
-      storage.close();
-    }
+    const status = service.status().find((item) => item.provider === "openai-codex");
+    expect(status?.method).toBe("device");
+    expect(status?.source).toBe("project-store");
+    expect(status?.accountId).toBe("acct_123");
   });
 });

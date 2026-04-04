@@ -1,164 +1,119 @@
 # NanoClaw MultiRuntime
 
-NanoClaw-style personal agent host with a pluggable runtime boundary. The current repository now includes a V2 parity-first shell around the original V1 core:
+An AI assistant host that follows the NanoClaw core operating model while replacing the Claude runtime boundary with Codex. The host keeps the same shape: channel registration, SQLite-backed message routing, per-group queueing, isolated group folders, scheduled tasks, and a main control channel.
 
-- channel registry with self-registration
-- `local-dev` and `main-local` built-in channels
-- registered group model with main-group privileges
-- router and outbound dispatch
-- file-based container-runner IPC scaffold
-- `CodexRuntime` executed through the agent-runner path
-- real container-engine execution via `docker`/`podman` compatible `run` + `exec`
-- host control plane for tasks, groups, mounts, and outbound messaging
-- skills-as-code scaffolding for future channel additions
+---
 
-## Current Shape
+## Why This Exists
 
-This repository is not a full `nanoclaw` clone, and it is not a plugin marketplace. It is a parity-first migration shell that preserves the original NanoClaw operating model while keeping the runtime boundary explicit.
+This repository keeps the NanoClaw host semantics but swaps the runtime/auth boundary that would normally depend on Claude Agent SDK and OneCLI. The intentional divergence is limited to:
 
-Implemented now:
+- `openai-codex` OAuth and device login
+- project-owned `provider_auth` storage
+- container-side `codex exec` execution
+- OpenAI / OpenAI Codex model policy
 
-- `src/channels/registry.ts`: channel contract and self-registration
-- `src/router/router.ts`: registered-group lookup, trigger handling, main-local commands, outbound routing
-- `src/host/control-plane.ts`: built-in admin/tool bridge
-- `src/runner/container-runner.ts`: file-based runner IPC
-- `container/agent-runner/src/index.ts`: agent-runner scaffold
-- `src/runtime/codex/codex-runtime.ts`: container-executed Codex runtime wrapper
-- `src/security/mount-security.ts`: allowlist-based extra mount validation
-- `setup/` and `setup.sh`: bootstrap and verification steps for install health checks
-- `groups/global/CLAUDE.md` and `groups/main/CLAUDE.md`: default memory templates
-- `container/skills/`: baseline in-container operator skills
-- `.claude/skills/`: operational skill entrypoints
-- `container/build.sh` and `scripts/start-host.sh`: production build and startup scripts
-
-Still intentionally out of scope:
-
-- full dashboard UI
-- dynamic runtime plugin marketplace
-- bundled Slack/Telegram/Gmail SDK integrations in core
-- multi-node orchestration or Kubernetes-style scheduling
-
-## Built-in Channels
-
-- `local-dev`
-  Use for development and regression tests.
-- `main-local`
-  Acts as the control channel and supports a minimal command set.
-
-Current main-local commands:
-
-- `/register-group <channel> <externalId> <folder>`
-- `/list-groups`
-- `/remote-status`
-- `/auth-status`
-
-## Configuration
-
-See [`.env.example`](./.env.example) for defaults. Important variables:
-
-- `NANOCLAW_DATA_ROOT`
-- `NANOCLAW_GROUPS_ROOT`
-- `NANOCLAW_SESSIONS_ROOT`
-- `NANOCLAW_IPC_ROOT`
-- `NANOCLAW_LOGS_ROOT`
-- `NANOCLAW_MAX_CONCURRENCY`
-- `NANOCLAW_SCHEDULER_POLL_INTERVAL_MS`
-- `NANOCLAW_CODEX_BINARY_PATH`
-- `NANOCLAW_RUNTIME_TIMEOUT_MS`
-- `NANOCLAW_SANDBOX_PROVIDER`
-- `NANOCLAW_CONTAINER_EXECUTOR`
-- `NANOCLAW_CONTAINER_ENGINE_BINARY`
-- `NANOCLAW_CONTAINER_IMAGE`
-- `NANOCLAW_CONTAINER_RUNNER_ENTRYPOINT`
-- `NANOCLAW_CONTAINER_RUNNER_PATH_IN_IMAGE`
-- `NANOCLAW_AGENT_RUNNER_MODE`
-- `NANOCLAW_CODEX_HOME_PATH`
-- `NANOCLAW_ASSISTANT_NAME`
-- `NANOCLAW_DEFAULT_TRIGGER`
-- `NANOCLAW_MOUNT_ALLOWLIST_PATH`
-- `NANOCLAW_DEFAULT_TIMEZONE`
-- `NANOCLAW_CONTAINER_SKILLS_PATH`
-
-Recommended modes:
-
-- local regression: `NANOCLAW_CONTAINER_EXECUTOR=process` and `NANOCLAW_AGENT_RUNNER_MODE=mock`
-- production container path: `NANOCLAW_CONTAINER_EXECUTOR=engine` and `NANOCLAW_AGENT_RUNNER_MODE=codex`
-
-## Development
+## Quick Start
 
 ```bash
 npm install
 npm run setup -- --step verify
-npm run typecheck
-npm run lint
-npm run test
-```
-
-Build the runner image:
-
-```bash
 npm run build:image
+npm run dev -- serve
 ```
 
-Start the long-running host service:
+Then in another terminal:
 
 ```bash
-npm run start:host
-```
-
-Send a local-dev message:
-
-```bash
+npm run dev -- send --channel main-local --external-id main-local:control --message "/auth-login openai-codex"
 npm run dev -- send --channel local-dev --external-id local-dev:default --message "@Andy hello"
 ```
 
-Use the control channel:
+## Philosophy
 
-```bash
-npm run dev -- send --channel main-local --external-id main-local:control --message "/list-groups"
+**Small enough to understand.** One process, a small number of source files, SQLite, filesystem IPC.
+
+**Secure by isolation.** Agents run in containers and only see what is explicitly mounted.
+
+**Forks over core bloat.** Core stays channel-agnostic. Future Slack, Telegram, Web, or Feishu support should live in separate forks.
+
+**Runtime is replaceable, host semantics are not.** This repository keeps the NanoClaw host model and changes only the runtime/auth pieces required for Codex.
+
+## What It Supports
+
+- Built-in development channels: `local-dev` and `main-local`
+- Main-channel group administration
+- Per-group queueing and message-driven execution
+- Scheduled tasks
+- Container execution with Codex
+- Project-owned OpenAI Codex login flow
+
+## Usage
+
+Talk to the dev channel with the trigger word:
+
+```text
+@Andy hello
 ```
 
-Schedule a one-shot task:
+From the main channel, manage groups and auth:
 
-```bash
-npm run dev -- schedule-once --group-id <group-id> --message "Follow up" --delay-ms 0
+```text
+/list-groups
+/auth-status
+/auth-login openai-codex
+/set-model <groupId> openai/gpt-5-mini
 ```
 
-Create a fixed-interval recurring task:
+CLI:
 
 ```bash
-npm run dev -- schedule-recurring --group-id <group-id> --message "Recurring follow-up" --interval-ms 60000
+npm run dev -- serve
+npm run dev -- auth login --provider openai-codex
+npm run dev -- auth login --provider openai-codex --method device
+npm run dev -- auth status
+npm run dev -- auth logout --provider openai-codex
 ```
 
-Create a cron task:
+## Requirements
+
+- Node.js 20+
+- Docker Desktop, Docker, or Podman
+- `codex` CLI available on the host
+
+## Architecture
+
+```text
+Channels --> SQLite --> Message loop / GroupQueue --> Container (Codex) --> Response
+```
+
+Key files:
+- `src/orchestrator.ts` - host orchestrator and state wiring
+- `src/db.ts` - chats/messages/router state/sessions/tasks/provider auth
+- `src/group-queue.ts` - per-group queue and concurrency control
+- `src/task-scheduler.ts` - scheduler loop
+- `src/ipc.ts` - IPC watcher and task processing
+- `src/router.ts` - message formatting and outbound routing
+- `src/container-runtime.ts` - container runtime helpers
+- `src/runner/container-runner.ts` - container runner and IPC bridge
+- `src/auth/openai-codex-auth-service.ts` - Codex OAuth and device login
+
+## Development
 
 ```bash
-npm run dev -- schedule-cron --group-id <group-id> --message "Daily follow-up" --cron "0 9 * * *" --timezone "Asia/Shanghai"
+npm run typecheck
+npm test
 ```
 
-Inspect setup and runtime health:
+Real container validation:
 
 ```bash
-npm run dev -- status
-npm run dev -- verify
+npm run build:image
+npm run test:container
 ```
 
-## Container and Deployment Assets
+## Notes
 
-- `container/Dockerfile`
-- `container/build.sh`
-- `container/test-bin/fake-codex`
-- `container/agent-runner/`
-- `container/skills/`
-- `setup/`
-- `setup.sh`
-- `scripts/start-host.sh`
-- `launchd/com.nanoclaw-multiruntime.plist`
-- `systemd/nanoclaw-multiruntime.service`
-- [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md)
-
-## Reference Docs
-
-- [Technical Architecture](./docs/ARCHITECTURE.md)
-- [V1 Development Breakdown](./docs/V1_TASKS.md)
-- [Deployment](./docs/DEPLOYMENT.md)
+- The host does not import or reuse `~/.codex/auth.json`.
+- Codex login is owned by this project and stored in project data.
+- `local-dev` and `main-local` are development conveniences, not the long-term channel story.

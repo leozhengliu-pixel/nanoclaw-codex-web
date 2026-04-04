@@ -1,16 +1,72 @@
-import fs from "node:fs/promises";
-import path from "node:path";
-
 import type { AppConfig } from "../config/index.js";
-import type { SqliteStorage } from "../storage/sqlite-storage.js";
-import type { ProviderCredential, ProviderId, ProviderOAuthCredential } from "../types/runtime.js";
+import type {
+  ProviderCredential,
+  ProviderId,
+  ProviderLoginMethod,
+  ProviderOAuthCredential,
+  ProviderAuthSource
+} from "../types/runtime.js";
+
+interface ProviderAuthStorage {
+  getProviderAuth(providerId: ProviderId): Record<string, unknown> | null;
+  upsertProviderAuth(providerId: ProviderId, credential: Record<string, unknown>): void;
+  clearProviderAuth(providerId: ProviderId): void;
+  listProviderAuth(): Array<{ providerId: string; credential: Record<string, unknown> }>;
+}
 
 const OPENAI_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const OPENAI_OAUTH_ISSUER = "https://auth.openai.com";
-const CODEX_AUTH_FILENAME = "auth.json";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function decodeJwtClaims(token: string): Record<string, unknown> | null {
+  const parts = token.split(".");
+  const payloadPart = parts[1];
+  if (!payloadPart) {
+    return null;
+  }
+
+  try {
+    const payloadRaw = Buffer.from(payloadPart, "base64url").toString("utf8");
+    return JSON.parse(payloadRaw) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function decodeJwtExpiryMs(token: string): number | null {
+  const claims = decodeJwtClaims(token);
+  return typeof claims?.exp === "number" && Number.isFinite(claims.exp) ? claims.exp * 1000 : null;
+}
+
+export function extractAccountIdFromToken(token: string): string | undefined {
+  const claims = decodeJwtClaims(token);
+  if (!claims) {
+    return undefined;
+  }
+
+  if (typeof claims.chatgpt_account_id === "string" && claims.chatgpt_account_id) {
+    return claims.chatgpt_account_id;
+  }
+
+  const nested = claims["https://api.openai.com/auth"];
+  if (isRecord(nested) && typeof nested.chatgpt_account_id === "string" && nested.chatgpt_account_id) {
+    return nested.chatgpt_account_id;
+  }
+
+  const organizations = claims.organizations;
+  if (Array.isArray(organizations) && isRecord(organizations[0]) && typeof organizations[0].id === "string") {
+    return organizations[0].id;
+  }
+
+  return undefined;
+}
+
+export function extractEmailFromToken(token: string): string | undefined {
+  const claims = decodeJwtClaims(token);
+  return typeof claims?.email === "string" && claims.email ? claims.email : undefined;
 }
 
 function normalizeStoredCredential(providerId: ProviderId, raw: Record<string, unknown> | null): ProviderCredential | null {
@@ -46,6 +102,15 @@ function normalizeStoredCredential(providerId: ProviderId, raw: Record<string, u
     if (typeof raw.email === "string" && raw.email) {
       credential.email = raw.email;
     }
+    if (typeof raw.idToken === "string" && raw.idToken) {
+      credential.idToken = raw.idToken;
+    }
+    if ((raw.method === "oauth" || raw.method === "device") && typeof raw.method === "string") {
+      credential.method = raw.method as ProviderLoginMethod;
+    }
+    if (raw.source === "project-store") {
+      credential.source = raw.source as ProviderAuthSource;
+    }
 
     return credential;
   }
@@ -53,98 +118,10 @@ function normalizeStoredCredential(providerId: ProviderId, raw: Record<string, u
   return null;
 }
 
-function decodeJwtExpiryMs(token: string): number | null {
-  const parts = token.split(".");
-  const payloadPart = parts[1];
-  if (!payloadPart) {
-    return null;
-  }
-
-  try {
-    const payloadRaw = Buffer.from(payloadPart, "base64url").toString("utf8");
-    const payload = JSON.parse(payloadRaw) as { exp?: unknown };
-    return typeof payload.exp === "number" && Number.isFinite(payload.exp) ? payload.exp * 1000 : null;
-  } catch {
-    return null;
-  }
-}
-
-function extractAccountId(tokens: Record<string, unknown>): string | undefined {
-  const candidates = [tokens.id_token, tokens.access_token];
-  for (const candidate of candidates) {
-    if (typeof candidate !== "string" || !candidate) {
-      continue;
-    }
-
-    try {
-      const payloadRaw = Buffer.from(candidate.split(".")[1] ?? "", "base64url").toString("utf8");
-      const claims = JSON.parse(payloadRaw) as Record<string, unknown>;
-      if (typeof claims.chatgpt_account_id === "string" && claims.chatgpt_account_id) {
-        return claims.chatgpt_account_id;
-      }
-
-      const nested = claims["https://api.openai.com/auth"];
-      if (isRecord(nested) && typeof nested.chatgpt_account_id === "string" && nested.chatgpt_account_id) {
-        return nested.chatgpt_account_id;
-      }
-
-      const organizations = claims.organizations;
-      if (Array.isArray(organizations) && isRecord(organizations[0]) && typeof organizations[0].id === "string") {
-        return organizations[0].id;
-      }
-    } catch {
-      continue;
-    }
-  }
-
-  return undefined;
-}
-
-async function readCodexHomeCredential(codexHomePath: string): Promise<ProviderOAuthCredential | null> {
-  const authPath = path.join(codexHomePath, CODEX_AUTH_FILENAME);
-  const raw = JSON.parse(await fs.readFile(authPath, "utf8")) as unknown;
-  if (!isRecord(raw)) {
-    return null;
-  }
-
-  const tokens = isRecord(raw.tokens) ? raw.tokens : raw;
-  const accessToken = tokens.access_token;
-  const refreshToken = tokens.refresh_token;
-  if (typeof accessToken !== "string" || typeof refreshToken !== "string" || !accessToken || !refreshToken) {
-    return null;
-  }
-
-  const expiresAt = decodeJwtExpiryMs(accessToken) ?? Date.now() + 60 * 60 * 1000;
-  const credential: ProviderOAuthCredential = {
-    type: "oauth",
-    provider: "openai-codex",
-    accessToken,
-    refreshToken,
-    expiresAt
-  };
-  const accountId = extractAccountId(tokens);
-  if (accountId) {
-    credential.accountId = accountId;
-  }
-  if (typeof tokens.email === "string" && tokens.email) {
-    credential.email = tokens.email;
-  }
-  return credential;
-}
-
-function getCodexHomeCandidates(config: AppConfig): string[] {
-  const candidates = [config.codexHomePath];
-  if (process.env.HOME) {
-    candidates.push(path.join(process.env.HOME, ".codex"));
-  }
-
-  return [...new Set(candidates.map((candidate) => path.resolve(candidate)))];
-}
-
 export class ProviderAuthService {
   public constructor(
-    private readonly storage: SqliteStorage,
-    private readonly config: AppConfig
+    private readonly storage: ProviderAuthStorage,
+    private readonly _config: AppConfig
   ) {}
 
   public get(providerId: ProviderId): ProviderCredential | null {
@@ -155,27 +132,42 @@ export class ProviderAuthService {
     this.storage.upsertProviderAuth(credential.provider, credential as unknown as Record<string, unknown>);
   }
 
-  public clear(providerId: ProviderId): void {
-    this.storage.clearProviderAuth(providerId);
+  public setOAuthCredential(input: {
+    provider: ProviderId;
+    accessToken: string;
+    refreshToken: string;
+    expiresAt?: number;
+    idToken?: string;
+    accountId?: string;
+    email?: string;
+    method: ProviderLoginMethod;
+  }): ProviderOAuthCredential {
+    const credential: ProviderOAuthCredential = {
+      type: "oauth",
+      provider: input.provider,
+      accessToken: input.accessToken,
+      refreshToken: input.refreshToken,
+      expiresAt: input.expiresAt ?? decodeJwtExpiryMs(input.accessToken) ?? Date.now() + 60 * 60 * 1000,
+      method: input.method,
+      source: "project-store"
+    };
+
+    if (input.accountId) {
+      credential.accountId = input.accountId;
+    }
+    if (input.email) {
+      credential.email = input.email;
+    }
+    if (input.idToken) {
+      credential.idToken = input.idToken;
+    }
+
+    this.set(credential);
+    return credential;
   }
 
-  public async importFromCodexHome(): Promise<void> {
-    let imported: ProviderOAuthCredential | null = null;
-    for (const candidate of getCodexHomeCandidates(this.config)) {
-      imported = await readCodexHomeCredential(candidate).catch(() => null);
-      if (imported) {
-        break;
-      }
-    }
-
-    if (!imported) {
-      return;
-    }
-
-    const existing = this.get("openai-codex");
-    if (!existing || existing.type !== "oauth" || imported.expiresAt > existing.expiresAt) {
-      this.set(imported);
-    }
+  public clear(providerId: ProviderId): void {
+    this.storage.clearProviderAuth(providerId);
   }
 
   public async refreshIfNeeded(providerId: ProviderId): Promise<ProviderCredential | null> {
@@ -203,45 +195,76 @@ export class ProviderAuthService {
     }
 
     const payload = (await response.json()) as Record<string, unknown>;
+    const accessToken = String(payload.access_token ?? "");
+    const refreshToken = String(payload.refresh_token ?? credential.refreshToken);
     const refreshed: ProviderOAuthCredential = {
       type: "oauth",
       provider: providerId,
-      accessToken: String(payload.access_token ?? ""),
-      refreshToken: String(payload.refresh_token ?? credential.refreshToken),
+      accessToken,
+      refreshToken,
       expiresAt:
-        Date.now() +
-        (typeof payload.expires_in === "number" && Number.isFinite(payload.expires_in) ? payload.expires_in : 3600) * 1000
+        decodeJwtExpiryMs(accessToken) ??
+        (Date.now() +
+          (typeof payload.expires_in === "number" && Number.isFinite(payload.expires_in) ? payload.expires_in : 3600) * 1000),
+      method: credential.method ?? "oauth",
+      source: "project-store"
     };
-    const accountId = extractAccountId(payload) ?? credential.accountId;
+
+    const accountId = extractAccountIdFromToken(String(payload.id_token ?? accessToken)) ?? credential.accountId;
+    const email = extractEmailFromToken(String(payload.id_token ?? accessToken)) ?? credential.email;
     if (accountId) {
       refreshed.accountId = accountId;
     }
-    if (credential.email) {
-      refreshed.email = credential.email;
+    if (email) {
+      refreshed.email = email;
+    }
+    const idToken = typeof payload.id_token === "string" && payload.id_token ? payload.id_token : credential.idToken;
+    if (idToken) {
+      refreshed.idToken = idToken;
     }
     this.set(refreshed);
     return refreshed;
   }
 
-  public status(): Array<{ provider: ProviderId; authMode: "api-key" | "oauth"; expiresAt?: number; accountId?: string }> {
+  public status(): Array<{
+    provider: ProviderId;
+    authMode: "api-key" | "oauth";
+    expiresAt?: number;
+    accountId?: string;
+    email?: string;
+    method?: ProviderLoginMethod;
+    source?: ProviderAuthSource;
+    state: "missing" | "stored" | "expired" | "refreshable";
+  }> {
     const rows = this.storage.listProviderAuth();
     return rows
       .map(({ providerId, credential }) => normalizeStoredCredential(providerId as ProviderId, credential))
       .filter((credential): credential is ProviderCredential => credential !== null)
       .map((credential) => {
         if (credential.type === "api-key") {
-          return { provider: credential.provider, authMode: "api-key" as const };
+          return {
+            provider: credential.provider,
+            authMode: "api-key" as const,
+            state: "stored" as const
+          };
         }
 
-        const status: { provider: ProviderId; authMode: "oauth"; expiresAt: number; accountId?: string } = {
-          provider: credential.provider,
-          authMode: "oauth",
-          expiresAt: credential.expiresAt
-        };
-        if (credential.accountId) {
-          status.accountId = credential.accountId;
+        const expiresAt = credential.expiresAt;
+        let state: "stored" | "expired" | "refreshable" = "stored";
+        if (expiresAt <= Date.now()) {
+          state = credential.refreshToken ? "refreshable" : "expired";
         }
-        return status;
+
+        return {
+          provider: credential.provider,
+          authMode: "oauth" as const,
+          expiresAt,
+          ...(credential.accountId ? { accountId: credential.accountId } : {}),
+          ...(credential.email ? { email: credential.email } : {}),
+          ...(credential.method ? { method: credential.method } : {}),
+          source: credential.source ?? "project-store",
+          state
+        };
       });
   }
 }
