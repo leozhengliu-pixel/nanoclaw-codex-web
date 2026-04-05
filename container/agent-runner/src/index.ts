@@ -9,9 +9,10 @@ import { fileURLToPath } from "node:url";
 import type { RunnerTaskRequest, RuntimeEventEnvelope, ToolRequestEnvelope, ToolResponseEnvelope } from "../../../src/ipc/protocol.js";
 import type { ProviderCredential } from "../../../src/types/runtime.js";
 
-const TOOL_BRIDGE_SOURCE = fileURLToPath(new URL("./tool-bridge.ts", import.meta.url));
+const TOOL_BRIDGE_SOURCE = fileURLToPath(
+  new URL(import.meta.url.endsWith(".ts") ? "./tool-bridge.ts" : "./tool-bridge.js", import.meta.url)
+);
 const require = createRequire(import.meta.url);
-const TSX_LOADER_PATH = require.resolve("tsx");
 
 function getArg(flag: string): string | undefined {
   const index = process.argv.indexOf(flag);
@@ -109,10 +110,15 @@ async function createToolBridge(
   const runtimeDir = path.join(request.workingDirectory, ".nanoclaw-runtime");
   const fallbackPath = path.join(runtimeDir, "nanoclaw-tool");
   const wrapperPath = "/usr/local/bin/nanoclaw-tool";
+  const bridgeUsesTypeScript = path.extname(TOOL_BRIDGE_SOURCE) === ".ts";
+  const tsxLoaderPath = bridgeUsesTypeScript ? require.resolve("tsx") : null;
+  const command = bridgeUsesTypeScript
+    ? `exec node --import ${JSON.stringify(tsxLoaderPath)} ${JSON.stringify(TOOL_BRIDGE_SOURCE)} "$@"`
+    : `exec node ${JSON.stringify(TOOL_BRIDGE_SOURCE)} "$@"`;
   const wrapper = [
     "#!/usr/bin/env sh",
     "set -eu",
-    `exec node --import ${JSON.stringify(TSX_LOADER_PATH)} ${JSON.stringify(TOOL_BRIDGE_SOURCE)} \"$@\"`
+    command
   ].join("\n");
 
   await fs.mkdir(runtimeDir, { recursive: true });
@@ -272,6 +278,36 @@ function extractResponseText(payload: Record<string, unknown>): string {
   return "";
 }
 
+function buildTokenUsage(raw: Record<string, unknown> | undefined):
+  | {
+      inputTokens?: number;
+      outputTokens?: number;
+      totalTokens?: number;
+    }
+  | undefined {
+  if (!raw) {
+    return undefined;
+  }
+
+  const tokenUsage: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+  } = {};
+
+  if (typeof raw.input_tokens === "number") {
+    tokenUsage.inputTokens = raw.input_tokens;
+  }
+  if (typeof raw.output_tokens === "number") {
+    tokenUsage.outputTokens = raw.output_tokens;
+  }
+  if (typeof raw.total_tokens === "number") {
+    tokenUsage.totalTokens = raw.total_tokens;
+  }
+
+  return Object.keys(tokenUsage).length > 0 ? tokenUsage : undefined;
+}
+
 async function runProviderRequest(request: RunnerTaskRequest, eventsFile: string): Promise<void> {
   if (!request.auth) {
     throw new Error(`Missing auth for ${request.provider}`);
@@ -306,19 +342,14 @@ async function runProviderRequest(request: RunnerTaskRequest, eventsFile: string
   }
 
   const usage = payload.usage as Record<string, unknown> | undefined;
+  const tokenUsage = buildTokenUsage(usage);
   await appendEvent(eventsFile, request.taskId, {
     type: "done",
     usage: {
       provider: request.provider,
       modelId: request.modelId,
       finishReason: typeof payload.status === "string" ? payload.status : "completed",
-      tokenUsage: usage
-        ? {
-            inputTokens: typeof usage.input_tokens === "number" ? usage.input_tokens : undefined,
-            outputTokens: typeof usage.output_tokens === "number" ? usage.output_tokens : undefined,
-            totalTokens: typeof usage.total_tokens === "number" ? usage.total_tokens : undefined
-          }
-        : undefined
+      ...(tokenUsage ? { tokenUsage } : {})
     }
   });
 }
@@ -455,14 +486,7 @@ async function runCodex(request: RunnerTaskRequest, eventsFile: string): Promise
           const usage = parsed.usage;
           if (usage && typeof usage === "object") {
             const typedUsage = usage as Record<string, unknown>;
-            tokenUsage = {
-              inputTokens:
-                typeof typedUsage.input_tokens === "number" ? typedUsage.input_tokens : undefined,
-              outputTokens:
-                typeof typedUsage.output_tokens === "number" ? typedUsage.output_tokens : undefined,
-              totalTokens:
-                typeof typedUsage.total_tokens === "number" ? typedUsage.total_tokens : undefined
-            };
+            tokenUsage = buildTokenUsage(typedUsage);
           }
         }
       }
@@ -491,14 +515,7 @@ async function runCodex(request: RunnerTaskRequest, eventsFile: string): Promise
           const usage = parsed.usage;
           if (usage && typeof usage === "object") {
             const typedUsage = usage as Record<string, unknown>;
-            tokenUsage = {
-              inputTokens:
-                typeof typedUsage.input_tokens === "number" ? typedUsage.input_tokens : undefined,
-              outputTokens:
-                typeof typedUsage.output_tokens === "number" ? typedUsage.output_tokens : undefined,
-              totalTokens:
-                typeof typedUsage.total_tokens === "number" ? typedUsage.total_tokens : undefined
-            };
+            tokenUsage = buildTokenUsage(typedUsage);
           }
         }
       }
@@ -541,7 +558,7 @@ async function runCodex(request: RunnerTaskRequest, eventsFile: string): Promise
         modelId: request.modelId,
         exitCode,
         finishReason: exitCode === 0 ? "completed" : "failed",
-        tokenUsage
+        ...(tokenUsage ? { tokenUsage } : {})
       }
     });
   } finally {

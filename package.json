@@ -7,6 +7,7 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "build:runtime": "rm -rf dist && tsc -p tsconfig.runtime.json && tsc -p container/agent-runner/tsconfig.runtime.json",
     "dev": "tsx src/index.ts",
     "serve": "tsx src/index.ts serve",
     "setup": "tsx setup/index.ts",

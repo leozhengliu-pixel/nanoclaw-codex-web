@@ -26,7 +26,7 @@ export function createTestConfig(root: string, overrides: Partial<AppConfig> = {
     containerEngineBinary: "docker",
     containerImage: "ignored",
     containerRunnerEntrypoint: path.resolve(process.cwd(), "container", "agent-runner", "src", "index.ts"),
-    containerRunnerPathInImage: "/app/container/agent-runner/src/index.ts",
+    containerRunnerPathInImage: "/app/dist/container/agent-runner/src/index.js",
     agentRunnerMode: "mock",
     assistantName: "Andy",
     defaultTrigger: "@Andy",

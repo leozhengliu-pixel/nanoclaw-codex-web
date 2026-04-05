@@ -120,7 +120,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
       resolvedEnv.NANOCLAW_CONTAINER_RUNNER_ENTRYPOINT ??
       path.resolve(cwd, "container", "agent-runner", "src", "index.ts"),
     containerRunnerPathInImage:
-      resolvedEnv.NANOCLAW_CONTAINER_RUNNER_PATH_IN_IMAGE ?? "/app/container/agent-runner/src/index.ts",
+      resolvedEnv.NANOCLAW_CONTAINER_RUNNER_PATH_IN_IMAGE ?? "/app/dist/container/agent-runner/src/index.js",
     agentRunnerMode: parseAgentRunnerMode(resolvedEnv.NANOCLAW_AGENT_RUNNER_MODE),
     assistantName: resolvedEnv.NANOCLAW_ASSISTANT_NAME ?? "Andy",
     defaultTrigger: resolvedEnv.NANOCLAW_DEFAULT_TRIGGER ?? "@Andy",

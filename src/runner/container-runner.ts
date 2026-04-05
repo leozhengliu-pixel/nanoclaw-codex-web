@@ -176,8 +176,6 @@ export class ContainerRunner {
         "/app",
         containerName,
         "node",
-        "--import",
-        "tsx",
         this.config.containerRunnerPathInImage,
         "--request",
         "/ipc/request.json",

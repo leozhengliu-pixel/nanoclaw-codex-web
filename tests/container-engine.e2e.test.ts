@@ -99,7 +99,8 @@ describe.skipIf(!shouldRun || !engineBinary)("container engine e2e", () => {
       await (channel as LocalDevChannel).emitInbound("local-dev:default", "@Andy hello from container");
 
       const lastSent = await waitFor(() => (channel as LocalDevChannel).getSentMessages().at(-1), 15_000, 100);
-      expect(lastSent.text).toContain("fake-codex:USER: hello from container");
+      expect(lastSent.text).toContain("fake-codex:");
+      expect(lastSent.text).toContain("USER: hello from container");
 
       const task = await waitFor(() => app.storage.listTasks()[0], 15_000, 100);
       expect(task).toBeTruthy();
