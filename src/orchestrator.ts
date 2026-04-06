@@ -56,7 +56,7 @@ import { CodexRuntime } from "./runtime/codex/codex-runtime.js";
 import { getDefaultModelRef, parseModelRef } from "./runtime/openai/model-policy.js";
 import { isSenderAllowed, isTriggerAllowed, loadSenderAllowlist, shouldDropMessage } from "./sender-allowlist.js";
 import { computeNextRun, startSchedulerLoop, stopSchedulerLoop } from "./task-scheduler.js";
-import type { AdditionalMount, RegisteredGroup as RootRegisteredGroup, ScheduledTask } from "./types.js";
+import type { AdditionalMount, NewMessage, RegisteredGroup as RootRegisteredGroup, ScheduledTask } from "./types.js";
 import type { ScheduledJob as CompatScheduledJob } from "./types/host.js";
 import type { AgentRuntime, PersistedRuntimeSession, RuntimeEvent, RuntimeMessage } from "./types/runtime.js";
 import { WebGateway } from "./web-gateway.js";
@@ -115,22 +115,37 @@ function formatRuntimeMessageContent(message: {
   return parts.join("\n\n");
 }
 
-function toRuntimeMessage(group: RootRegisteredGroup, message: {
-  content: string;
-  is_bot_message?: number;
-  is_from_me?: number;
-  reply_to_sender_name?: string;
-  reply_to_message_content?: string;
-}): RuntimeMessage {
+function toRuntimeMessage(
+  group: RootRegisteredGroup,
+  message: {
+    content: string;
+    is_bot_message?: boolean;
+    is_from_me?: boolean;
+    reply_to_sender_name?: string;
+    reply_to_message_content?: string;
+  }
+): RuntimeMessage {
   const role = message.is_bot_message || message.is_from_me ? "assistant" : "user";
-  const normalizedContent = role === "user" ? normalizeTriggeredText(group, message.content) : message.content;
+  const normalizedContent =
+    role === "user" ? (normalizeTriggeredText(group, message.content) ?? message.content) : message.content;
+  const formattedMessage: {
+    content: string;
+    reply_to_sender_name?: string;
+    reply_to_message_content?: string;
+  } = {
+    content: normalizedContent
+  };
+
+  if (message.reply_to_sender_name) {
+    formattedMessage.reply_to_sender_name = message.reply_to_sender_name;
+  }
+  if (message.reply_to_message_content) {
+    formattedMessage.reply_to_message_content = message.reply_to_message_content;
+  }
+
   return {
     role,
-    content: formatRuntimeMessageContent({
-      content: normalizedContent,
-      reply_to_sender_name: message.reply_to_sender_name,
-      reply_to_message_content: message.reply_to_message_content
-    })
+    content: formatRuntimeMessageContent(formattedMessage)
   };
 }
 
