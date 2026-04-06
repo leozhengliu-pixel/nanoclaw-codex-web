@@ -1,5 +1,7 @@
 # NanoClaw Codex
 
+This repository is initialized from [`leozhengliu-pixel/nanoclaw-codex`](https://github.com/leozhengliu-pixel/nanoclaw-codex) and reserved for the future web channel distribution. At this stage it is still a straight copy of the core and does not yet include the web-specific channel implementation.
+
 A NanoClaw-compatible core for building self-hosted AI agents with OpenAI Codex. It keeps the NanoClaw host operating model while replacing the Claude runtime boundary with Codex, giving developers and integrators a containerized agent runtime, SQLite-backed message routing, per-group queues, scheduled tasks, and project-owned Codex authentication. It is intended for channel forks, internal tooling, and custom deployments rather than as a complete end-user distribution.
 
 ---
