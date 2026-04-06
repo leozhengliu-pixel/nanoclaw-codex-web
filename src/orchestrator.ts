@@ -4,6 +4,7 @@ import path from "node:path";
 import { OpenAICodexAuthService } from "./auth/openai-codex-auth-service.js";
 import { ProviderAuthService } from "./auth/provider-auth-service.js";
 import { getChannelFactory, getRegisteredChannelNames, type Channel } from "./channels/registry.js";
+import { WebChannel } from "./channels/web-channel.js";
 import "./channels/index.js";
 import { StorageBackedRemoteControlRecorder, type RemoteControlRecorder } from "./control-events.js";
 import { ASSISTANT_NAME, TIMEZONE, getTriggerPattern } from "./config.js";
@@ -16,7 +17,9 @@ import {
   createExecutionTask,
   createTask as createScheduledTask,
   deleteTask,
+  getAllRegisteredGroups,
   getAllTasks,
+  getChatHistory,
   getExecutionTask,
   getLastBotMessageTimestamp,
   getMessagesSince,
@@ -56,6 +59,7 @@ import { computeNextRun, startSchedulerLoop, stopSchedulerLoop } from "./task-sc
 import type { AdditionalMount, RegisteredGroup as RootRegisteredGroup, ScheduledTask } from "./types.js";
 import type { ScheduledJob as CompatScheduledJob } from "./types/host.js";
 import type { AgentRuntime, PersistedRuntimeSession, RuntimeEvent, RuntimeMessage } from "./types/runtime.js";
+import { WebGateway } from "./web-gateway.js";
 
 interface CompatRegisteredGroup {
   id: string;
@@ -64,6 +68,7 @@ interface CompatRegisteredGroup {
   folder: string;
   isMain: boolean;
   trigger: string;
+  requiresTrigger?: boolean;
   containerConfig: {
     additionalMounts: AdditionalMount[];
     timeoutMs?: number;
@@ -91,6 +96,42 @@ interface InboundEnvelope {
   replyToMessageId?: string;
   replyToMessageContent?: string;
   replyToSenderName?: string;
+}
+
+const RUNTIME_HISTORY_LIMIT = 24;
+
+function formatRuntimeMessageContent(message: {
+  content: string;
+  reply_to_sender_name?: string;
+  reply_to_message_content?: string;
+}): string {
+  const parts: string[] = [];
+  if (message.reply_to_sender_name || message.reply_to_message_content) {
+    const replySender = message.reply_to_sender_name ?? "unknown";
+    const replyBody = message.reply_to_message_content?.trim() || "[empty]";
+    parts.push(`Replying to ${replySender}: ${replyBody}`);
+  }
+  parts.push(message.content);
+  return parts.join("\n\n");
+}
+
+function toRuntimeMessage(group: RootRegisteredGroup, message: {
+  content: string;
+  is_bot_message?: number;
+  is_from_me?: number;
+  reply_to_sender_name?: string;
+  reply_to_message_content?: string;
+}): RuntimeMessage {
+  const role = message.is_bot_message || message.is_from_me ? "assistant" : "user";
+  const normalizedContent = role === "user" ? normalizeTriggeredText(group, message.content) : message.content;
+  return {
+    role,
+    content: formatRuntimeMessageContent({
+      content: normalizedContent,
+      reply_to_sender_name: message.reply_to_sender_name,
+      reply_to_message_content: message.reply_to_message_content
+    })
+  };
 }
 
 export interface OrchestratorAppFacade {
@@ -126,13 +167,14 @@ export interface OrchestratorServices {
   app: OrchestratorAppFacade;
   channels: Map<string, Channel>;
   queue: GroupQueue;
-  start: () => void;
+  webGateway: WebGateway | null;
+  start: () => Promise<void>;
   stop: () => Promise<void>;
 }
 
 function normalizeTriggeredText(group: RootRegisteredGroup, text: string): string | null {
   const trimmed = text.trim();
-  if (group.isMain) {
+  if (group.isMain || group.requiresTrigger === false) {
     return trimmed;
   }
 
@@ -153,6 +195,7 @@ function toCompatGroup(jid: string, group: RootRegisteredGroup): CompatRegistere
     folder: group.folder,
     isMain: group.isMain === true,
     trigger: group.trigger,
+    ...(group.requiresTrigger === false ? { requiresTrigger: false } : {}),
     containerConfig: {
       additionalMounts: group.containerConfig?.additionalMounts ?? [],
       ...(group.containerConfig?.timeout ? { timeoutMs: group.containerConfig.timeout } : {})
@@ -170,6 +213,7 @@ function toRootGroup(group: CompatRegisteredGroup): RootRegisteredGroup {
     added_at: group.createdAt,
     ...(group.containerConfig ? { containerConfig: { additionalMounts: group.containerConfig.additionalMounts } } : {}),
     ...(group.runtimeConfig ? { runtimeConfig: group.runtimeConfig } : {}),
+    ...(group.requiresTrigger === false ? { requiresTrigger: false } : {}),
     ...(group.isMain ? { isMain: true } : {}),
     channel: group.channel,
     externalId: group.externalId
@@ -260,16 +304,9 @@ export async function createOrchestrator(config = loadConfig(), runtimeOverride?
   };
 
   const syncRegisteredGroups = (): Record<string, RootRegisteredGroup> => {
-    const groups = Object.fromEntries(
-      Object.keys({ ...registeredGroups }).map((jid) => [jid, getRegisteredGroup(jid) ?? registeredGroups[jid]!])
-    );
-    const storedGroups = Object.entries(registeredGroups).length === 0 ? [] : Object.keys(registeredGroups);
-    for (const jid of storedGroups) {
-      void jid;
-    }
     registeredGroups = {
       ...registeredGroups,
-      ...groups
+      ...getAllRegisteredGroups()
     };
     return registeredGroups;
   };
@@ -299,6 +336,7 @@ export async function createOrchestrator(config = loadConfig(), runtimeOverride?
     folder: string;
     isMain?: boolean;
     trigger?: string;
+    requiresTrigger?: boolean;
     containerConfig?: CompatRegisteredGroup["containerConfig"];
     runtimeConfig?: CompatRegisteredGroup["runtimeConfig"];
   }): CompatRegisteredGroup => {
@@ -310,6 +348,7 @@ export async function createOrchestrator(config = loadConfig(), runtimeOverride?
       folder: input.folder,
       isMain: input.isMain ?? false,
       trigger: input.trigger ?? config.defaultTrigger,
+      ...(input.requiresTrigger === false || input.isMain ? { requiresTrigger: false } : {}),
       containerConfig: input.containerConfig ?? { additionalMounts: [] },
       ...(input.runtimeConfig ? { runtimeConfig: input.runtimeConfig } : {}),
       createdAt: new Date().toISOString()
@@ -393,6 +432,14 @@ export async function createOrchestrator(config = loadConfig(), runtimeOverride?
       : null;
 
     const model = rootGroup.runtimeConfig ?? getDefaultModelRef();
+    const runtimeMessages: RuntimeMessage[] = getChatHistory(groupId, RUNTIME_HISTORY_LIMIT)
+      .filter((message) => message.content.trim().length > 0)
+      .map((message) => toRuntimeMessage(rootGroup, message));
+
+    if (runtimeMessages.length === 0) {
+      runtimeMessages.push({ role: "user", content: prompt });
+    }
+
     const session = await runtime.createSession({
       groupId,
       group: compatGroup as never,
@@ -418,7 +465,7 @@ export async function createOrchestrator(config = loadConfig(), runtimeOverride?
         sessionId: session.id,
         group: compatGroup as never,
         workingDirectory: managedGroup.workspacePath,
-        messages: [{ role: "user", content: prompt }] as RuntimeMessage[],
+        messages: runtimeMessages,
         memoryFiles: [managedGroup.globalMemoryFile, managedGroup.groupMemoryFile],
         sessionsPath: managedGroup.sessionsPath,
         runtimeTimeoutMs: compatGroup.containerConfig.timeoutMs ?? config.runtimeTimeoutMs,
@@ -1034,8 +1081,22 @@ export async function createOrchestrator(config = loadConfig(), runtimeOverride?
     controlPlane
   };
 
-  const start = (): void => {
+  const webChannel = channels.get("web");
+  const webGateway =
+    config.web.enabled && webChannel instanceof WebChannel
+      ? new WebGateway({
+          config,
+          channel: webChannel,
+          app,
+          projectRoot: process.cwd()
+        })
+      : null;
+
+  const start = async (): Promise<void> => {
     registeredGroups = syncRegisteredGroups();
+    if (webGateway) {
+      await webGateway.start();
+    }
     for (const jid of Object.keys(registeredGroups)) {
       queue.enqueueMessageCheck(jid);
     }
@@ -1057,11 +1118,15 @@ export async function createOrchestrator(config = loadConfig(), runtimeOverride?
     app,
     channels,
     queue,
+    webGateway,
     start,
     stop: async () => {
       stopping = true;
       stopSchedulerLoop();
       await queue.shutdown(0);
+      if (webGateway) {
+        await webGateway.stop();
+      }
       await Promise.all([...channels.values()].map((channel) => channel.disconnect()));
       _closeDatabase();
     }

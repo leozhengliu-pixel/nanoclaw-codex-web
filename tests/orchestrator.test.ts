@@ -30,13 +30,46 @@ describe("orchestrator", () => {
     );
 
     try {
-      orchestrator.start();
+      await orchestrator.start();
       const channel = orchestrator.channels.get("local-dev");
       expect(channel).toBeInstanceOf(LocalDevChannel);
 
       await (channel as LocalDevChannel).emitInbound("local-dev:default", "@Andy hello");
       const sent = await waitForSentMessage(channel as LocalDevChannel, "orchestrator:hello");
       expect(sent.at(-1)?.text).toContain("orchestrator:hello");
+    } finally {
+      await orchestrator.stop();
+    }
+  });
+
+  it("includes recent chat history in runtime turn input", async () => {
+    const root = await createTempDir("nanoclaw-orchestrator-history-");
+    const turnInputs: string[][] = [];
+    const runtime = new MockRuntime({
+      messagePrefix: "history",
+      onTurnInput: (input) => {
+        turnInputs.push(input.messages.map((message) => `${message.role}:${message.content}`));
+      }
+    });
+    const orchestrator = await createOrchestrator(createTestConfig(root, { agentRunnerMode: "mock" }), runtime);
+
+    try {
+      await orchestrator.start();
+      const channel = orchestrator.channels.get("local-dev");
+      expect(channel).toBeInstanceOf(LocalDevChannel);
+
+      await (channel as LocalDevChannel).emitInbound("local-dev:default", "@Andy first");
+      await waitForSentMessage(channel as LocalDevChannel, "history:first");
+
+      await (channel as LocalDevChannel).emitInbound("local-dev:default", "@Andy second");
+      await waitForSentMessage(channel as LocalDevChannel, "history:second");
+
+      expect(turnInputs).toHaveLength(2);
+      expect(turnInputs[1]).toEqual([
+        "user:first",
+        "assistant:history:first",
+        "user:second"
+      ]);
     } finally {
       await orchestrator.stop();
     }

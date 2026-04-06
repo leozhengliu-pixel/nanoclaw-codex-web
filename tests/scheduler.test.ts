@@ -16,7 +16,7 @@ describe("scheduler and tool bridge", () => {
     const app = orchestrator.app;
 
     try {
-      orchestrator.start();
+      await orchestrator.start();
       const group = app.storage.getRegisteredGroupByAddress("local-dev", "local-dev:default");
       const job = app.scheduler.createOnce(group!.id, "scheduled hello", new Date(Date.now() - 1));
       await app.scheduler.tick(new Date());
@@ -38,7 +38,7 @@ describe("scheduler and tool bridge", () => {
     const app = orchestrator.app;
 
     try {
-      orchestrator.start();
+      await orchestrator.start();
       const group = app.storage.getRegisteredGroupByAddress("local-dev", "local-dev:default");
       const seeded = await app.host.enqueueScheduledPrompt(group!.id, "hello tools");
 
@@ -69,7 +69,7 @@ describe("scheduler and tool bridge", () => {
     const app = orchestrator.app;
 
     try {
-      orchestrator.start();
+      await orchestrator.start();
       const group = app.storage.getRegisteredGroupByAddress("local-dev", "local-dev:default");
       const job = app.scheduler.createCron(group!.id, "cron hello", "* * * * *", "UTC");
       await app.scheduler.tick(new Date(job.nextRunAt));

@@ -28,7 +28,7 @@ function printUsage(): void {
 async function runServeCommand(): Promise<void> {
   const orchestrator = await createOrchestrator();
   try {
-    orchestrator.start();
+    await orchestrator.start();
     console.log(JSON.stringify({ ok: true, mode: "serve" }, null, 2));
     await new Promise<void>((resolve) => {
       const shutdown = () => resolve();
@@ -43,7 +43,7 @@ async function runServeCommand(): Promise<void> {
 async function runSendCommand(args: string[]): Promise<void> {
   const orchestrator = await createOrchestrator();
   try {
-    orchestrator.start();
+    await orchestrator.start();
     const channelName = getFlag(args, "--channel") ?? "local-dev";
     const externalId = getFlag(args, "--external-id") ?? (channelName === "main-local" ? "main-local:control" : "local-dev:default");
     const message = getFlag(args, "--message");

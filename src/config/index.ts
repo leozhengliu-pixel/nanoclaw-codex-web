@@ -5,6 +5,32 @@ export type GroupWorkspacePolicy = "group-scoped";
 export type SandboxProviderMode = "container" | "local";
 export type AgentRunnerMode = "codex" | "mock";
 export type ContainerExecutorMode = "engine" | "process";
+export type WebAuthMode = "trusted-proxy" | "dev-token";
+
+export interface WebChannelConfig {
+  enabled: boolean;
+  bind: string;
+  port: number;
+  publicBaseUrl: string;
+  allowedOrigins: string[];
+  trustedProxies: string[];
+  messageMaxChars: number;
+  chatHistoryMaxChars: number;
+  rateLimits: {
+    connectPerMinute: number;
+    sendPerMinute: number;
+    historyPerMinute: number;
+  };
+  auth: {
+    mode: WebAuthMode;
+    trustedProxy: {
+      userHeader: string;
+      requiredHeaders: string[];
+      allowUsers: string[];
+    };
+    devToken?: string;
+  };
+}
 
 export interface AppConfig {
   dataRoot: string;
@@ -32,6 +58,7 @@ export interface AppConfig {
   openaiCodexBaseUrl: string;
   defaultTimezone: string;
   containerSkillsPath: string;
+  web: WebChannelConfig;
 }
 
 function parsePositiveInteger(value: string | undefined, fallback: number): number {
@@ -91,6 +118,33 @@ function parseContainerExecutor(value: string | undefined): ContainerExecutorMod
   throw new Error(`Unsupported container executor: ${value}`);
 }
 
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined) {
+    return fallback;
+  }
+  return value === "1" || value.toLowerCase() === "true" || value.toLowerCase() === "yes";
+}
+
+function parseCsv(value: string | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseWebAuthMode(value: string | undefined): WebAuthMode {
+  if (!value || value === "trusted-proxy") {
+    return "trusted-proxy";
+  }
+  if (value === "dev-token") {
+    return "dev-token";
+  }
+  throw new Error(`Unsupported web auth mode: ${value}`);
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): AppConfig {
   const resolvedEnv = loadDotEnvFile(cwd, env);
   const dataRoot = path.resolve(cwd, resolvedEnv.NANOCLAW_DATA_ROOT ?? "data");
@@ -130,6 +184,30 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
     openaiApiBaseUrl: resolvedEnv.NANOCLAW_OPENAI_API_BASE_URL ?? "https://api.openai.com/v1",
     openaiCodexBaseUrl: resolvedEnv.NANOCLAW_OPENAI_CODEX_BASE_URL ?? "https://chatgpt.com/backend-api/codex",
     defaultTimezone: resolvedEnv.NANOCLAW_DEFAULT_TIMEZONE ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC",
-    containerSkillsPath: path.resolve(cwd, resolvedEnv.NANOCLAW_CONTAINER_SKILLS_PATH ?? path.join("container", "skills"))
+    containerSkillsPath: path.resolve(cwd, resolvedEnv.NANOCLAW_CONTAINER_SKILLS_PATH ?? path.join("container", "skills")),
+    web: {
+      enabled: parseBoolean(resolvedEnv.NANOCLAW_WEB_ENABLED, true),
+      bind: resolvedEnv.NANOCLAW_WEB_BIND ?? "127.0.0.1",
+      port: parsePositiveInteger(resolvedEnv.NANOCLAW_WEB_PORT, 4318),
+      publicBaseUrl: resolvedEnv.NANOCLAW_WEB_PUBLIC_BASE_URL ?? "http://127.0.0.1:4318",
+      allowedOrigins: parseCsv(resolvedEnv.NANOCLAW_WEB_ALLOWED_ORIGINS),
+      trustedProxies: parseCsv(resolvedEnv.NANOCLAW_WEB_TRUSTED_PROXIES),
+      messageMaxChars: parsePositiveInteger(resolvedEnv.NANOCLAW_WEB_MESSAGE_MAX_CHARS, 16_000),
+      chatHistoryMaxChars: parsePositiveInteger(resolvedEnv.NANOCLAW_WEB_CHAT_HISTORY_MAX_CHARS, 4_000),
+      rateLimits: {
+        connectPerMinute: parsePositiveInteger(resolvedEnv.NANOCLAW_WEB_RATE_LIMIT_CONNECT_PER_MINUTE, 30),
+        sendPerMinute: parsePositiveInteger(resolvedEnv.NANOCLAW_WEB_RATE_LIMIT_SEND_PER_MINUTE, 60),
+        historyPerMinute: parsePositiveInteger(resolvedEnv.NANOCLAW_WEB_RATE_LIMIT_HISTORY_PER_MINUTE, 120)
+      },
+      auth: {
+        mode: parseWebAuthMode(resolvedEnv.NANOCLAW_WEB_AUTH_MODE),
+        trustedProxy: {
+          userHeader: (resolvedEnv.NANOCLAW_WEB_AUTH_TRUSTED_PROXY_USER_HEADER ?? "x-forwarded-user").toLowerCase(),
+          requiredHeaders: parseCsv(resolvedEnv.NANOCLAW_WEB_AUTH_TRUSTED_PROXY_REQUIRED_HEADERS).map((item) => item.toLowerCase()),
+          allowUsers: parseCsv(resolvedEnv.NANOCLAW_WEB_AUTH_TRUSTED_PROXY_ALLOW_USERS)
+        },
+        ...(resolvedEnv.NANOCLAW_WEB_DEV_TOKEN ? { devToken: resolvedEnv.NANOCLAW_WEB_DEV_TOKEN } : {})
+      }
+    }
   };
 }

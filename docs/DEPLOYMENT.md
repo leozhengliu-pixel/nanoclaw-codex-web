@@ -1,6 +1,6 @@
 # Deployment
 
-This document describes how to run the NanoClaw-compatible core in development or integration environments. It does not describe a complete end-user product deployment, because this repository does not yet ship an official production channel implementation.
+This document describes how to run the `nanoclaw-codex-web` browser channel distribution. The runtime is still the same NanoClaw-compatible Codex core, but browser access now goes through a trusted-proxy web gateway instead of only `local-dev` / `main-local`.
 
 - `launchd/com.nanoclaw-codex.plist` provides a macOS service template.
 - `systemd/nanoclaw-codex.service` provides a Linux service template.
@@ -9,6 +9,7 @@ This document describes how to run the NanoClaw-compatible core in development o
 - `container/skills/` provides baseline in-container operator skills that are mounted read-only at runtime.
 - `setup.sh` and `setup/index.ts` provide bootstrap, status, and verify checks.
 - `scripts/start-host.sh` starts the long-running host process with the production `serve` command.
+- `ui/` builds the static browser chat UI that the web gateway serves.
 
 Replace `{{PROJECT_ROOT}}` and `{{NODE_PATH}}` before installation.
 
@@ -39,17 +40,48 @@ Current image:
 
 - `ghcr.io/leozhengliu-pixel/nanoclaw-codex-agent`
 
-Deprecated image:
+## Web Gateway Configuration
 
-- `ghcr.io/leozhengliu-pixel/nanoclaw-multiruntime-agent`
+The web gateway is host-side and should usually bind to loopback only:
+
+- `NANOCLAW_WEB_ENABLED=true`
+- `NANOCLAW_WEB_BIND=127.0.0.1`
+- `NANOCLAW_WEB_PORT=4318`
+- `NANOCLAW_WEB_PUBLIC_BASE_URL=https://chat.example.com`
+- `NANOCLAW_WEB_ALLOWED_ORIGINS=https://chat.example.com`
+- `NANOCLAW_WEB_TRUSTED_PROXIES=127.0.0.1`
+- `NANOCLAW_WEB_AUTH_MODE=trusted-proxy`
+- `NANOCLAW_WEB_AUTH_TRUSTED_PROXY_USER_HEADER=x-forwarded-user`
+- `NANOCLAW_WEB_AUTH_TRUSTED_PROXY_REQUIRED_HEADERS=x-forwarded-proto,x-forwarded-host`
+- `NANOCLAW_WEB_AUTH_TRUSTED_PROXY_ALLOW_USERS=you@example.com`
+
+The browser route is intentionally strict:
+
+- non-trusted proxy IPs are rejected
+- missing auth headers are rejected
+- disallowed `Origin` values are rejected
+- rate limits apply to connect, history, and send requests
+- `dev-token` mode is for explicit loopback-only development, not production
+
+## Reverse Proxy Shape
+
+Recommended deployment:
+
+1. Browser connects to `https://chat.example.com`
+2. Reverse proxy authenticates the user with OAuth/OIDC
+3. Proxy injects `x-forwarded-user` and required headers
+4. Proxy forwards HTTP and WebSocket traffic to `127.0.0.1:4318`
+5. `nanoclaw-codex-web` maps that identity to a stable `web:<user>` channel JID
+6. The message then enters the normal orchestrator, queue, transcript, and Codex runtime path
 
 ## What Is Not Included
 
-- No official production Web channel
 - No official Slack, Telegram, or Feishu channel
-- No host image or docker-compose bundle marketed as a complete product deployment
+- No full browser control plane
+- No anonymous public browser chat
+- No hostile multi-tenant support
 
-If a future channel repository needs a host image, that image should be treated as an integration artifact for that channel distribution rather than a change in this repository's core-release positioning.
+This repository is still scoped to a single trusted operator boundary. If you need mixed-trust or adversarial-user isolation, split trust boundaries with separate hosts and separate credentials.
 
 ## Rename Note
 

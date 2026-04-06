@@ -244,6 +244,19 @@ export function getAllChats(): ChatInfo[] {
   `).all() as ChatInfo[];
 }
 
+export function getChat(chatJid: string): ChatInfo | null {
+  const row = db
+    .prepare(
+      `
+        SELECT jid, name, last_message_time, channel, is_group
+        FROM chats
+        WHERE jid = ?
+      `
+    )
+    .get(chatJid) as ChatInfo | undefined;
+  return row ?? null;
+}
+
 export function getLastGroupSync(): string | null {
   const row = db.prepare(`SELECT last_message_time FROM chats WHERE jid = '__group_sync__'`).get() as { last_message_time: string } | undefined;
   return row?.last_message_time || null;
@@ -340,6 +353,20 @@ export function getMessagesSince(chatJid: string, sinceTimestamp: string, botPre
     ) ORDER BY timestamp
   `;
   return db.prepare(sql).all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
+}
+
+export function getChatHistory(chatJid: string, limit = 100): NewMessage[] {
+  const sql = `
+    SELECT * FROM (
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message,
+             reply_to_message_id, reply_to_message_content, reply_to_sender_name
+      FROM messages
+      WHERE chat_jid = ?
+      ORDER BY timestamp DESC
+      LIMIT ?
+    ) ORDER BY timestamp
+  `;
+  return db.prepare(sql).all(chatJid, limit) as NewMessage[];
 }
 
 export function getLastBotMessageTimestamp(chatJid: string, botPrefix: string): string | undefined {

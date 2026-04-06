@@ -1,14 +1,17 @@
 {
-  "name": "nanoclaw-codex",
+  "name": "nanoclaw-codex-web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "NanoClaw-compatible self-hosted AI agent core with OpenAI Codex runtime support.",
+  "description": "NanoClaw-compatible browser chat distribution with a trusted-proxy web channel and OpenAI Codex runtime support.",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "npm run build:server && npm run build:web",
+    "build:server": "tsc -p tsconfig.json",
+    "build:web": "vite build --config ui/vite.config.ts",
     "build:runtime": "rm -rf dist && tsc -p tsconfig.runtime.json && tsc -p container/agent-runner/tsconfig.runtime.json",
     "dev": "tsx src/index.ts",
+    "dev:web": "vite --config ui/vite.config.ts",
     "serve": "tsx src/index.ts serve",
     "setup": "tsx setup/index.ts",
     "typecheck": "tsc --noEmit",
@@ -23,18 +26,29 @@
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
-    "cron-parser": "^5.5.0"
+    "cron-parser": "^5.5.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-markdown": "^10.1.0",
+    "rehype-sanitize": "^6.0.0",
+    "remark-gfm": "^4.0.1",
+    "ws": "^8.20.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.22.0",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.13.9",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^5.2.0",
     "eslint": "^9.22.0",
     "globals": "^15.15.0",
     "prettier": "^3.5.3",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2",
     "typescript-eslint": "^8.26.1",
+    "vite": "^7.3.1",
     "vitest": "^3.1.1"
   }
 }

@@ -1,6 +1,6 @@
-# NanoClaw Codex Documentation
+# NanoClaw Codex Web Documentation
 
-These files are the local design documents and developer references for the Codex-based NanoClaw core fork. The repository is positioned as a NanoClaw-compatible core release for integrators, channel authors, and teams building self-hosted AI agents or Codex-powered chatbot infrastructure, not as a complete end-user product distribution.
+These files are the local design documents and developer references for the Codex-based NanoClaw web channel distribution. The repository is positioned as a NanoClaw-compatible browser chat fork for integrators and channel authors building a trusted-proxy web surface on top of the Codex core.
 
 | This directory | Purpose |
 |---|---|
@@ -8,4 +8,4 @@ These files are the local design documents and developer references for the Code
 | [SECURITY.md](SECURITY.md) | Security model and container boundaries |
 | [REQUIREMENTS.md](REQUIREMENTS.md) | Original goals and fork-specific decisions |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Working architecture notes for this repo |
-| [DEPLOYMENT.md](DEPLOYMENT.md) | Core deployment, runtime, and release notes |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Web gateway deployment, proxy, and runtime notes |

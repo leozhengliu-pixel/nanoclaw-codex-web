@@ -35,6 +35,29 @@ export function createTestConfig(root: string, overrides: Partial<AppConfig> = {
     openaiCodexBaseUrl: "https://chatgpt.com/backend-api/codex",
     defaultTimezone: "UTC",
     containerSkillsPath: path.resolve(process.cwd(), "container", "skills"),
+    web: {
+      enabled: false,
+      bind: "127.0.0.1",
+      port: 0,
+      publicBaseUrl: "http://127.0.0.1:4318",
+      allowedOrigins: ["http://127.0.0.1:4318"],
+      trustedProxies: ["127.0.0.1", "::1"],
+      messageMaxChars: 16_000,
+      chatHistoryMaxChars: 4_000,
+      rateLimits: {
+        connectPerMinute: 30,
+        sendPerMinute: 60,
+        historyPerMinute: 120
+      },
+      auth: {
+        mode: "trusted-proxy",
+        trustedProxy: {
+          userHeader: "x-forwarded-user",
+          requiredHeaders: [],
+          allowUsers: []
+        }
+      }
+    },
     ...overrides
   };
 }

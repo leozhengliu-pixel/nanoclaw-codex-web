@@ -12,7 +12,7 @@ describe("router", () => {
     const app = orchestrator.app;
 
     try {
-      orchestrator.start();
+      await orchestrator.start();
       await app.router.handleInbound({
         channel: "local-dev",
         externalId: "local-dev:missing",
@@ -29,7 +29,7 @@ describe("router", () => {
     const orchestrator = await createOrchestrator(createTestConfig(root));
 
     try {
-      orchestrator.start();
+      await orchestrator.start();
       const channel = orchestrator.channels.get("main-local") as MainLocalChannel;
       await channel.emitInbound("main-local:control", "/remote-status");
       expect(channel.getSentMessages().length).toBeGreaterThan(0);
@@ -44,7 +44,7 @@ describe("router", () => {
     const app = orchestrator.app;
 
     try {
-      orchestrator.start();
+      await orchestrator.start();
       app.providerAuth.setOAuthCredential({
         provider: "openai-codex",
         accessToken: "header.payload.sig",
@@ -69,7 +69,7 @@ describe("router", () => {
     const app = orchestrator.app;
 
     try {
-      orchestrator.start();
+      await orchestrator.start();
       const group = app.storage.getRegisteredGroupByAddress("local-dev", "local-dev:default");
       expect(group).toBeTruthy();
       const channel = orchestrator.channels.get("main-local") as MainLocalChannel;
@@ -91,7 +91,7 @@ describe("router", () => {
     const app = orchestrator.app;
 
     try {
-      orchestrator.start();
+      await orchestrator.start();
       vi.spyOn(app.codexAuth, "login").mockRejectedValue(new Error("OpenAI Codex auth preflight failed"));
       const channel = orchestrator.channels.get("main-local") as MainLocalChannel;
       await channel.emitInbound("main-local:control", "/auth-login openai-codex");
@@ -107,7 +107,7 @@ describe("router", () => {
     const orchestrator = await createOrchestrator(createTestConfig(root));
 
     try {
-      orchestrator.start();
+      await orchestrator.start();
       const mainChannel = orchestrator.channels.get("main-local") as MainLocalChannel;
       const localChannel = orchestrator.channels.get("local-dev") as LocalDevChannel;
       await mainChannel.emitInbound("main-local:control", "/sync-groups");

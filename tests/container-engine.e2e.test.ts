@@ -84,7 +84,7 @@ describe.skipIf(!shouldRun || !engineBinary)("container engine e2e", () => {
     const app = orchestrator.app;
 
     try {
-      orchestrator.start();
+      await orchestrator.start();
       app.providerAuth.setOAuthCredential({
         provider: "openai-codex",
         accessToken: "header.payload.sig",

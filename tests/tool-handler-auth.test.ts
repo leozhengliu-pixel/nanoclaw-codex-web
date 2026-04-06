@@ -12,7 +12,7 @@ describe("tool handler auth", () => {
     const orchestrator = await createOrchestrator(createTestConfig(root));
 
     try {
-      orchestrator.start();
+      await orchestrator.start();
       const handler = new RunnerToolHandler(
         orchestrator.app.controlPlane,
         new StorageBackedRemoteControlRecorder({ appendRemoteControlEvent, listRemoteControlEvents })
@@ -50,7 +50,7 @@ describe("tool handler auth", () => {
     const orchestrator = await createOrchestrator(createTestConfig(root));
 
     try {
-      orchestrator.start();
+      await orchestrator.start();
       const handler = new RunnerToolHandler(
         orchestrator.app.controlPlane,
         new StorageBackedRemoteControlRecorder({ appendRemoteControlEvent, listRemoteControlEvents })
@@ -93,7 +93,7 @@ describe("tool handler auth", () => {
     const orchestrator = await createOrchestrator(createTestConfig(root));
 
     try {
-      orchestrator.start();
+      await orchestrator.start();
       const handler = new RunnerToolHandler(
         orchestrator.app.controlPlane,
         new StorageBackedRemoteControlRecorder({ appendRemoteControlEvent, listRemoteControlEvents })

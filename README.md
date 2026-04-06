@@ -1,41 +1,71 @@
-# NanoClaw Codex
+# NanoClaw Codex Web
 
-This repository is initialized from [`leozhengliu-pixel/nanoclaw-codex`](https://github.com/leozhengliu-pixel/nanoclaw-codex) and reserved for the future web channel distribution. At this stage it is still a straight copy of the core and does not yet include the web-specific channel implementation.
+This repository is the **web channel distribution** built on top of [`leozhengliu-pixel/nanoclaw-codex`](https://github.com/leozhengliu-pixel/nanoclaw-codex). It keeps the NanoClaw-compatible Codex core and adds a browser chat surface that runs through the same queue, transcript, session, scheduler, and tool IPC pipeline as every other channel.
 
-A NanoClaw-compatible core for building self-hosted AI agents with OpenAI Codex. It keeps the NanoClaw host operating model while replacing the Claude runtime boundary with Codex, giving developers and integrators a containerized agent runtime, SQLite-backed message routing, per-group queues, scheduled tasks, and project-owned Codex authentication. It is intended for channel forks, internal tooling, and custom deployments rather than as a complete end-user distribution.
+The v1 scope is intentionally narrow:
+
+- Web chat only
+- Single operator
+- Trusted proxy auth by default
+- No anonymous public chat
+- No full browser control plane
 
 ---
 
 ## Why This Exists
 
-This repository keeps the NanoClaw host semantics but swaps the runtime/auth boundary that would normally depend on Claude Agent SDK and OneCLI. The intentional divergence is limited to:
+This repository keeps the NanoClaw host semantics from `nanoclaw-codex` and adds a browser-facing channel. The intentional divergence from the upstream core stays limited to:
 
+- web gateway and `web:*` channel routing
+- trusted-proxy browser authentication and allowlist checks
+- static browser chat UI
 - `openai-codex` OAuth and device login
 - project-owned `provider_auth` storage
 - container-side `codex exec` execution
 - OpenAI / OpenAI Codex model policy
 
-The built-in channels are intentionally limited to `local-dev` and `main-local`. Real user-facing entrypoints such as Web, Slack, Telegram, or Feishu should ship as separate forks or repositories on top of this core.
+The built-in channels are now:
 
-Keywords: NanoClaw, Codex, OpenAI Codex, self-hosted AI agent, AI agent framework, containerized agent runtime, SQLite message router, scheduled automation, multi-channel chatbot core.
+- `web`
+- `local-dev`
+- `main-local`
 
-## Core Development / Integration Quick Start
+Keywords: NanoClaw, Codex, OpenAI Codex, self-hosted AI agent, web chat channel, trusted proxy auth, browser chat gateway, SQLite message router, scheduled automation, multi-channel chatbot core.
+
+## Web Channel Quick Start
 
 ```bash
 npm install
+npm run build:web
 npm run setup -- --step verify
 npm run build:image
 npm run dev -- serve
 ```
 
-Then in another terminal:
+Configure trusted proxy web settings in `.env`:
+
+```bash
+cp .env.example .env
+```
+
+At minimum set:
+
+```bash
+NANOCLAW_WEB_PUBLIC_BASE_URL=https://chat.example.com
+NANOCLAW_WEB_ALLOWED_ORIGINS=https://chat.example.com
+NANOCLAW_WEB_TRUSTED_PROXIES=127.0.0.1
+NANOCLAW_WEB_AUTH_MODE=trusted-proxy
+NANOCLAW_WEB_AUTH_TRUSTED_PROXY_USER_HEADER=x-forwarded-user
+```
+
+For local validation, you can still use the dev channels in another terminal:
 
 ```bash
 npm run dev -- send --channel main-local --external-id main-local:control --message "/auth-login openai-codex"
 npm run dev -- send --channel local-dev --external-id local-dev:default --message "@Andy hello"
 ```
 
-This quick start validates the core locally. It is not the same thing as deploying a complete end-user product.
+Then put a trusted reverse proxy in front of the host and browse to your configured public URL.
 
 ## Philosophy
 
@@ -43,34 +73,46 @@ This quick start validates the core locally. It is not the same thing as deployi
 
 **Secure by isolation.** Agents run in containers and only see what is explicitly mounted.
 
-**Forks over core bloat.** Core stays channel-agnostic. Future Slack, Telegram, Web, or Feishu support should live in separate forks.
+**Forks over core bloat.** Core stays channel-agnostic. Web lives here; future Slack, Telegram, or Feishu support should still live in separate forks.
 
 **Runtime is replaceable, host semantics are not.** This repository keeps the NanoClaw host model and changes only the runtime/auth pieces required for Codex.
 
 ## What It Supports
 
+- Trusted-proxy web gateway with browser chat
 - Built-in development channels: `local-dev` and `main-local`
 - Main-channel group administration
 - Per-group queueing and message-driven execution
 - Scheduled tasks
 - Container execution with Codex
 - Project-owned OpenAI Codex login flow
+- Browser transcript history, typing, reply context, and session reuse
 
 ## Search-Friendly Overview
 
-If you are looking for a self-hosted AI agent core, Codex-powered chatbot backend, OpenAI Codex orchestration layer, or a NanoClaw fork for Web/Slack/Telegram/Feishu integrations, this repository is the core layer those channel-specific distributions should build on.
+If you are looking for a self-hosted AI agent web channel, Codex-powered browser chat backend, trusted-proxy AI chat gateway, or a NanoClaw fork for web-based chat access, this repository is the dedicated web distribution.
 
-## Image Release
+## Runtime Image
 
 The published GHCR image is the core agent runtime image:
 
 - `ghcr.io/leozhengliu-pixel/nanoclaw-codex-agent`
 
-It is meant to be launched by a host process that implements the NanoClaw core control plane. It is not a standalone end-user entrypoint and is not intended to be used as `docker run ...` for a complete product experience.
+It is still the agent runtime image, not a standalone browser product container. The web distribution adds a host-side web gateway and static UI on top of the same core/agent split.
 
 Previous image name:
 
 - `ghcr.io/leozhengliu-pixel/nanoclaw-multiruntime-agent` (deprecated)
+
+## Security Model
+
+- Single trusted operator boundary
+- Reverse proxy is the only browser ingress
+- Trusted proxy headers are required by default
+- `allowedOrigins` is enforced
+- No host-header origin fallback
+- No anonymous browser mode in production
+- Web chat does not expose main/control-plane privileges
 
 ## Usage
 
@@ -97,6 +139,7 @@ npm run dev -- auth login --provider openai-codex
 npm run dev -- auth login --provider openai-codex --method device
 npm run dev -- auth status
 npm run dev -- auth logout --provider openai-codex
+npm run dev -- dev:web
 ```
 
 ## Requirements
@@ -140,6 +183,6 @@ npm run test:container
 
 - The host does not import or reuse `~/.codex/auth.json`.
 - Codex login is owned by this project and stored in project data.
-- `local-dev` and `main-local` are development conveniences, not the long-term channel story.
-- This repository is a core release. Real production channels should live in separate channel forks or sibling repositories.
-- This repository was renamed from `nanoclaw-multiruntime`. Update `git remote` and GHCR pull paths to `nanoclaw-codex`.
+- `local-dev` and `main-local` remain development conveniences.
+- The production browser path is intended to run behind a trusted reverse proxy with OAuth/OIDC.
+- This repository was initialized from `nanoclaw-codex` and stays aligned with that core where possible.

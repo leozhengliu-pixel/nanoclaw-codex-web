@@ -35,7 +35,7 @@ describe("app integration", () => {
     const app = orchestrator.app;
 
     try {
-      orchestrator.start();
+      await orchestrator.start();
       const channel = orchestrator.channels.get("local-dev");
       expect(channel).toBeInstanceOf(LocalDevChannel);
       await (channel as LocalDevChannel).emitInbound("local-dev:default", "@Andy hello");
@@ -54,7 +54,7 @@ describe("app integration", () => {
     const app = orchestrator.app;
 
     try {
-      orchestrator.start();
+      await orchestrator.start();
       const channel = orchestrator.channels.get("main-local");
       expect(channel).toBeInstanceOf(MainLocalChannel);
       await (channel as MainLocalChannel).emitInbound(
@@ -80,7 +80,7 @@ describe("app integration", () => {
     const app = orchestrator.app;
 
     try {
-      orchestrator.start();
+      await orchestrator.start();
       const channel = orchestrator.channels.get("local-dev") as LocalDevChannel;
       await channel.emitInbound("local-dev:default", "@Andy first");
       await waitForSentMessage(channel, "session:first");
@@ -112,7 +112,7 @@ describe("app integration", () => {
     );
 
     try {
-      orchestrator.start();
+      await orchestrator.start();
       const channel = orchestrator.channels.get("local-dev") as LocalDevChannel;
       await orchestrator.app.router.handleInbound({
         channel: "local-dev",
